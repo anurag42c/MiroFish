@@ -1,14 +1,22 @@
 services:
-  mirofish:
-    image: ghcr.io/666ghj/mirofish:latest
-    # 加速镜像（如拉取缓慢可替换上方地址）
-    # image: ghcr.nju.edu.cn/666ghj/mirofish:latest
-    container_name: mirofish
+  mirofish-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mirofish-backend-dev
     env_file:
       - .env
     ports:
-      - "3000:3000"
       - "5001:5001"
-    restart: unless-stopped
+    # Override the default CMD (which starts both frontend+backend) to run
+    # only the Flask backend on port 5001 for the mTORch PoC integration.
+    command: ["uv", "run", "--project", "backend", "python", "backend/run.py"]
     volumes:
       - ./backend/uploads:/app/backend/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
