@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at TEXT DEFAULT CURREN
 SQL);
     }
 
+    /** Idempotent upgrades so an existing data/ folder keeps working after code updates. */
+    public static function upgrade(): void
+    {
+        self::migrate();
+        self::pdo()->exec('CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY, username TEXT, ip TEXT, at INTEGER)');
+        $cols = array_column(self::all('PRAGMA table_info(weighments)'), 'name');
+        foreach (['first_img', 'second_img'] as $c) {
+            if (!in_array($c, $cols, true)) { self::pdo()->exec("ALTER TABLE weighments ADD COLUMN $c TEXT"); }
+        }
+    }
+
     public static function audit(string $action, string $detail = ''): void
     {
         self::q('INSERT INTO audit(user, action, detail) VALUES (?,?,?)', [$_SESSION['user']['username'] ?? 'system', $action, $detail]);

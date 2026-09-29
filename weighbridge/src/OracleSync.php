@@ -101,7 +101,7 @@ final class OracleSync
         $cfg = Settings::all();
         $res = ['ok' => 0, 'failed' => 0, 'error' => null];
         if ($cfg['ora_enabled'] !== '1') { $res['error'] = 'Oracle transfer is disabled in Setup.'; return $res; }
-        $rows = Db::all("SELECT * FROM weighments WHERE status = 'CLOSED' AND sync_status IN ('PENDING','FAILED') ORDER BY id LIMIT ?",
+        $rows = Db::all("SELECT * FROM weighments WHERE status IN ('CLOSED','CANCELLED') AND sync_status IN ('PENDING','FAILED') ORDER BY id LIMIT ?",
             [$limit ?? (int)$cfg['ora_batch']]);
         if (!$rows) { return $res; }
         $o = new self($cfg);

@@ -27,11 +27,12 @@ final class Settings
         'request_cmd' => '',            // optional ASCII command sent before each read (e.g. "W\r\n")
         'min_capture_kg' => '20',
         'allow_manual' => '0',
+        'cam_url' => '', 'cam_user' => '', 'cam_pass' => '', 'api_token_hash' => '',
         // oracle
         'ora_enabled' => '0', 'ora_host' => '', 'ora_port' => '1521', 'ora_service' => '',
         'ora_user' => '', 'ora_pass' => '', 'ora_table' => 'WEIGHBRIDGE_TICKETS', 'ora_batch' => '50',
     ];
-    public const SECRETS = ['ora_pass'];
+    public const SECRETS = ['ora_pass', 'cam_pass'];
 
     private static ?array $cache = null;
 

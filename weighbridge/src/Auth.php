@@ -7,16 +7,25 @@ final class Auth
     {
         if (session_status() === PHP_SESSION_NONE) {
             session_name('wbsess');
-            session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax', 'lifetime' => 0]);
+            session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax', 'lifetime' => 0, 'secure' => !empty($_SERVER['HTTPS'])]);
             session_start();
         }
     }
 
     public static function login(string $u, string $p): bool
     {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'cli';
+        Db::q('DELETE FROM login_attempts WHERE at < ?', [time() - 900]);
+        if ((int)Db::val('SELECT COUNT(*) FROM login_attempts WHERE (username = ? OR ip = ?) AND at > ?', [$u, $ip, time() - 600]) >= 8) {
+            throw new RuntimeException('Too many failed logins. Try again in 10 minutes.');
+        }
         $row = Db::one('SELECT * FROM users WHERE username = ? AND active = 1', [$u]);
-        if (!$row || !password_verify($p, $row['pass_hash'])) { return false; }
-        session_regenerate_id(true);
+        if (!$row || !password_verify($p, $row['pass_hash'])) {
+            Db::q('INSERT INTO login_attempts(username, ip, at) VALUES (?,?,?)', [$u, $ip, time()]);
+            return false;
+        }
+        Db::q('DELETE FROM login_attempts WHERE username = ?', [$u]);
+        if (session_status() === PHP_SESSION_ACTIVE) { session_regenerate_id(true); }
         $_SESSION['user'] = ['id' => (int)$row['id'], 'username' => $row['username'], 'role' => $row['role']];
         Db::audit('login');
         return true;

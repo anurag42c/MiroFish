@@ -21,6 +21,7 @@ page_head('Ticket ' . $w['ticket_no']);
     <tr><th>NET WEIGHT</th><td colspan="3" style="font-size:22px"><b><?= $kg($w['net_kg']) ?></b></td></tr>
   </table>
   <p><?= e($w['remarks']) ?></p>
+  <?php foreach (['first_img' => '1st', 'second_img' => '2nd'] as $c => $l) if ($w[$c]) echo '<img src="snapshot.php?f=' . e($w[$c]) . '" alt="' . $l . ' weighment photo" style="max-width:48%;margin-right:1%">'; ?>
   <p class="noprint"><button onclick="print()">Print</button> <a class="btn sec" href="index.php">Back</a></p>
 </div>
 <?php page_foot();

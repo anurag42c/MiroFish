@@ -5,7 +5,7 @@ Auth::require();
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Auth::checkCsrf();
     if (isset($_POST['sync'])) { Auth::require(true); $r = OracleSync::syncPending(500); flash("Oracle sync: {$r['ok']} sent, {$r['failed']} failed" . ($r['error'] ? ' - ' . $r['error'] : ''), $r['error'] ? 'err' : 'ok'); }
-    if (isset($_POST['retry'])) { Auth::require(true); Db::q("UPDATE weighments SET sync_status='PENDING' WHERE status='CLOSED' AND sync_status='FAILED'"); flash('Failed tickets re-queued.'); }
+    if (isset($_POST['retry'])) { Auth::require(true); Db::q("UPDATE weighments SET sync_status='PENDING' WHERE status IN ('CLOSED','CANCELLED') AND sync_status='FAILED'"); flash('Failed tickets re-queued.'); }
     redirect('reports.php?' . http_build_query($_GET));
 }
 
@@ -24,7 +24,7 @@ if (isset($_GET['csv'])) {
     exit;
 }
 $tot = array_sum(array_map(fn($w) => $w['status'] === 'CLOSED' ? (float)$w['net_kg'] : 0, $rows));
-$pending = Db::val("SELECT COUNT(*) FROM weighments WHERE status='CLOSED' AND sync_status IN ('PENDING','FAILED')");
+$pending = Db::val("SELECT COUNT(*) FROM weighments WHERE status IN ('CLOSED','CANCELLED') AND sync_status IN ('PENDING','FAILED')");
 page_head('Reports');
 ?>
 <div class="card"><form method="get" class="row" style="align-items:end">

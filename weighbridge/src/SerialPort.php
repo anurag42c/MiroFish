@@ -30,6 +30,7 @@ final class SerialPort
     {
         $c = $this->cfg;
         if (($c['conn_type'] ?? 'serial') === 'tcp') {
+            if (!valid_host((string)$c['tcp_host']) || (int)$c['tcp_port'] < 1 || (int)$c['tcp_port'] > 65535) { throw new RuntimeException('Invalid TCP host/port'); }
             $fh = @stream_socket_client("tcp://{$c['tcp_host']}:{$c['tcp_port']}", $en, $es, 5);
             if (!$fh) { throw new RuntimeException("TCP connect to {$c['tcp_host']}:{$c['tcp_port']} failed: $es"); }
             stream_set_blocking($fh, false);
@@ -38,6 +39,7 @@ final class SerialPort
         }
 
         $port = (string)$c['serial_port'];
+        if (!valid_port($port)) { throw new RuntimeException('Invalid serial port name (use COM3 or /dev/ttyUSB0)'); }
         $baud = (int)$c['baud']; $bits = (int)$c['data_bits']; $par = strtoupper((string)$c['parity']); $stop = (string)$c['stop_bits'];
 
         if (self::isWindows()) {

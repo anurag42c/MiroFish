@@ -74,7 +74,7 @@ page_head('Weighing');
           <td><form method="post" style="display:flex;gap:4px;flex-wrap:wrap"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$w['id'] ?>">
             <?php if ($manualOk): ?><input name="manual_kg" type="number" step="0.01" placeholder="manual" style="width:90px"><?php endif; ?>
             <button name="do" value="second" data-needs-stable disabled>2nd weight</button>
-            <?php if (Auth::isAdmin()): ?><button name="do" value="cancel" class="sec" onclick="var r=prompt('Cancel reason?');if(!r)return false;this.form.insertAdjacentHTML('beforeend','<input type=hidden name=reason value=\''+r.replace(/'/g,'')+'\'>')">Cancel</button><?php endif; ?>
+            <?php if (Auth::isAdmin()): ?><button name="do" value="cancel" class="sec" onclick="var r=prompt('Cancel reason?');if(!r)return false;var i=document.createElement('input');i.type='hidden';i.name='reason';i.value=r;this.form.appendChild(i)">Cancel</button><?php endif; ?>
           </form></td></tr>
       <?php endforeach; ?></table><?php endif; ?>
     </div>

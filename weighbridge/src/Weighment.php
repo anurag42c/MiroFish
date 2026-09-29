@@ -61,7 +61,7 @@ final class Weighment
         $now = date('Y-m-d H:i:s');
         $party = trim((string)($in['party'] ?? '')); $mat = trim((string)($in['material'] ?? ''));
 
-        $pdo = Db::pdo(); $pdo->beginTransaction();
+        $pdo = Db::pdo(); $pdo->exec('BEGIN IMMEDIATE');   // serialise ticket-number allocation
         try {
             $ticket = self::nextTicket();
             Db::q('INSERT INTO weighments(ticket_no, vehicle_no, party, material, direction, driver, challan_no, remarks, first_type, first_kg, first_at, first_manual, operator, created_at)
@@ -71,10 +71,11 @@ final class Weighment
                 $useStored ? 'GROSS' : $firstType, $kg, $now, $man, Auth::user()['username'] ?? 'system', $now]);
             $id = Db::id();
             self::remember('vehicles', $veh); self::remember('parties', $party); self::remember('materials', $mat);
+            if ($img = Camera::snapshot($ticket, 'in')) { Db::q('UPDATE weighments SET first_img = ? WHERE id = ?', [$img, $id]); }
             if ($useStored) { self::finish($id, (float)$stored, 'STORED TARE', 0, $now, true); }
             Db::audit('ticket_create', $ticket);
-            $pdo->commit();
-        } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+            $pdo->exec('COMMIT');
+        } catch (Throwable $e) { if ($pdo->inTransaction()) { $pdo->exec('ROLLBACK'); } throw $e; }
         return $id;
     }
 
@@ -84,6 +85,7 @@ final class Weighment
         if (!$w) { throw new RuntimeException('Ticket not found or already closed.'); }
         [$kg, $man] = self::capture($manualKg);
         self::finish($id, $kg, null, $man, date('Y-m-d H:i:s'));
+        if ($img = Camera::snapshot($w['ticket_no'], 'out')) { Db::q('UPDATE weighments SET second_img = ? WHERE id = ?', [$img, $id]); }
         Db::audit('ticket_close', $w['ticket_no']);
     }
 
@@ -105,7 +107,10 @@ final class Weighment
 
     public static function cancel(int $id, string $reason): void
     {
-        Db::q("UPDATE weighments SET status='CANCELLED', remarks=TRIM(COALESCE(remarks,'') || ' [CANCELLED: ' || ? || ']'), sync_status='NA' WHERE id=? AND status<>'CANCELLED'", [$reason, $id]);
+        // A ticket already in Oracle must be re-sent so Oracle also shows it as CANCELLED.
+        Db::q("UPDATE weighments SET remarks=TRIM(COALESCE(remarks,'') || ' [CANCELLED: ' || ? || ']'),
+               sync_status = CASE WHEN sync_status IN ('SYNCED','PENDING','FAILED') AND gross_kg IS NOT NULL THEN 'PENDING' ELSE 'NA' END,
+               status='CANCELLED' WHERE id=? AND status<>'CANCELLED'", [$reason, $id]);
         Db::audit('ticket_cancel', "$id $reason");
     }
 }

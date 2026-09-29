@@ -3,6 +3,9 @@ Description=Weighbridge -> Oracle store-and-forward sync
 After=network.target
 
 [Service]
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/www/weighbridge/data
 User=www-data
 WorkingDirectory=/var/www/weighbridge
 ExecStart=/usr/bin/php /var/www/weighbridge/bin/sync_oracle.php --loop=30

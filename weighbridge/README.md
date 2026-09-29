@@ -23,6 +23,9 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | `bin/scale_daemon.php` | Serial/TCP reader service |
 | `bin/sync_oracle.php` | Oracle push service (`--loop=30`) |
 | `sql/oracle_schema.sql` | Oracle table DDL |
+| `bin/backup.php` | Online SQLite backup with integrity check |
+| `tests/run.php` | Automated tests |
+| `docs/COMPARISON.md` | Comparison with public GitHub weighbridge projects |
 | `deploy/` | systemd units, Windows NSSM installer |
 | `data/` | SQLite DB + encryption key (created on install; **back this up**) |
 
@@ -147,6 +150,21 @@ journalctl -u weighbridge-scale -f                      # see errors
 - [ ] Back up `data/` daily (SQLite file **and** `app.key`; without the key the saved Oracle password can't be decrypted).
 - [ ] Set the PC timezone; optional `WB_TZ=Asia/Kolkata` environment variable.
 - [ ] Legal-for-trade note: if used for commercial billing, the indicator must be approved/sealed; this software only records what the indicator sends.
+
+## Production readiness
+
+**Verified here (automated, `php tests/run.php` - 44 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; plus an HTTP smoke test of every page and API, a read from a real tty device (pseudo-terminal), and backup + integrity check.
+
+**Not verified by the author - do these on site before go-live:** real indicator/RS-485 wiring and Modbus map, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
+
+Added for production: login lockout, CSP/security headers, allow-listed port/host values, `BEGIN IMMEDIATE` ticket numbering, cancellation propagated to Oracle, optional camera snapshot per weighment, read-only ERP REST API (`Setup > General`), health endpoint `api/health.php` (HTTP 503 when the scale daemon is down - point your uptime monitor at it), daily backup script:
+
+```bash
+php bin/backup.php --dir=/backup/weighbridge --keep=30        # cron: 15 2 * * *
+php tests/run.php                                              # run after every upgrade
+```
+Also keep a copy of `data/app.key` (not inside the same backup folder if that folder is shared).
+See `docs/COMPARISON.md` for how this compares with public GitHub projects.
 
 ## Troubleshooting
 

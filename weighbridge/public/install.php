@@ -8,10 +8,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!preg_match('/^[A-Za-z0-9_.-]{3,30}$/', $u)) { $err = 'Username: 3-30 letters/digits.'; }
     elseif (strlen($p) < 8) { $err = 'Password must be at least 8 characters.'; }
     else {
-        Db::migrate();
+        Db::upgrade();
         Auth::createUser($u, $p, 'admin');
         Settings::set('company_name', trim($_POST['company'] ?? '') ?: 'My Weighbridge');
         Settings::set('conn_type', 'simulator');   // safe default: works without hardware until configured
+        Settings::set('schema', '2');
         Settings::set('installed', '1');
         flash('Installed. Log in, then open Setup to configure your scale (currently in Simulator mode).');
         redirect('login.php');

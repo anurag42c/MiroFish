@@ -2,12 +2,12 @@
 declare(strict_types=1);
 
 define('WB_ROOT', dirname(__DIR__));
-define('WB_DATA', WB_ROOT . '/data');
+define('WB_DATA', rtrim(getenv('WB_DATA') ?: WB_ROOT . '/data', '/\\'));
 define('WB_DB', WB_DATA . '/weighbridge.sqlite');
 
 date_default_timezone_set(getenv('WB_TZ') ?: 'Asia/Kolkata');
 
-foreach (['Db', 'Settings', 'Auth', 'SerialPort', 'ScaleParser', 'Modbus', 'ScaleReader', 'OracleSync', 'Weighment'] as $c) {
+foreach (['Db', 'Settings', 'Auth', 'SerialPort', 'ScaleParser', 'Modbus', 'ScaleReader', 'OracleSync', 'Camera', 'Weighment'] as $c) {
     require_once __DIR__ . "/$c.php";
 }
 
@@ -20,5 +20,9 @@ function flash(?string $msg = null, string $type = 'ok'): ?array
     if ($msg !== null) { $_SESSION['flash'] = [$msg, $type]; return null; }
     $f = $_SESSION['flash'] ?? null; unset($_SESSION['flash']); return $f;
 }
+
+/** Serial device / host values reach shell commands and sockets, so accept only safe shapes. */
+function valid_port(string $p): bool { return (bool)preg_match('#^(COM\d{1,3}|/dev/[A-Za-z0-9_./:-]{1,80})$#', $p); }
+function valid_host(string $h): bool { return (bool)preg_match('/^[A-Za-z0-9._-]{1,253}$/', $h); }
 
 function redirect(string $url): never { header('Location: ' . $url); exit; }

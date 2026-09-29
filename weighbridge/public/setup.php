@@ -11,27 +11,35 @@ $fields = [
                 'weight_regex', 'stable_regex', 'unstable_regex', 'stable_count', 'stable_tolerance', 'divisor', 'unit',
                 'modbus_slave', 'modbus_func', 'modbus_addr', 'modbus_regs', 'modbus_word_order', 'modbus_poll_ms', 'min_capture_kg'],
     'oracle' => ['ora_host', 'ora_port', 'ora_service', 'ora_user', 'ora_pass', 'ora_table', 'ora_batch'],
-    'general' => ['company_name', 'company_address', 'ticket_prefix'],
+    'general' => ['company_name', 'company_address', 'ticket_prefix', 'cam_url', 'cam_user', 'cam_pass'],
 ];
 $checks = ['scale' => ['modbus_signed'], 'oracle' => ['ora_enabled'], 'general' => ['allow_manual']];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Auth::checkCsrf();
     try {
-        if (isset($fields[$tab])) {
+        if (isset($fields[$tab]) && !isset($_POST['do'])) {
             foreach (['weight_regex', 'stable_regex', 'unstable_regex'] as $rx) {
                 if (isset($_POST[$rx]) && ($err = ScaleParser::regexError(trim($_POST[$rx])))) { throw new RuntimeException("$rx: $err"); }
             }
+            if (isset($_POST['serial_port']) && !valid_port(trim($_POST['serial_port']))) { throw new RuntimeException('Serial port must look like COM3 or /dev/ttyUSB0'); }
+            if (isset($_POST['tcp_host']) && !valid_host(trim($_POST['tcp_host']))) { throw new RuntimeException('Invalid gateway host name / IP'); }
+            if (isset($_POST['ora_table']) && !preg_match('/^[A-Za-z][A-Za-z0-9_$#]{0,29}(\.[A-Za-z][A-Za-z0-9_$#]{0,29})?$/', trim($_POST['ora_table']))) { throw new RuntimeException('Invalid Oracle table name'); }
             foreach ($fields[$tab] as $k) {
                 if (!isset($_POST[$k])) { continue; }
                 $v = trim((string)$_POST[$k]);
-                if ($k === 'ora_pass' && $v === '') { continue; }        // blank = keep existing secret
+                if (in_array($k, Settings::SECRETS, true) && $v === '') { continue; }        // blank = keep existing secret
                 if (in_array($k, ['terminator', 'request_cmd'], true)) { $v = (string)$_POST[$k]; }
                 Settings::set($k, $v);
             }
             foreach ($checks[$tab] ?? [] as $k) { Settings::set($k, isset($_POST[$k]) ? '1' : '0'); }
             Db::audit('settings_save', $tab);
             flash('Settings saved. The scale daemon picks up changes within 5 seconds.');
+        } elseif (($_POST['do'] ?? '') === 'apitoken') {
+            $t = bin2hex(random_bytes(24)); Settings::set('api_token_hash', hash('sha256', $t));
+            flash("New API token (shown once, copy it now): $t"); Db::audit('api_token_new');
+        } elseif (($_POST['do'] ?? '') === 'apioff') {
+            Settings::set('api_token_hash', ''); flash('API disabled.'); Db::audit('api_token_off');
         } elseif (($_POST['do'] ?? '') === 'adduser') {
             $u = trim($_POST['username']); if (!preg_match('/^[A-Za-z0-9_.-]{3,30}$/', $u) || strlen($_POST['password']) < 8) { throw new RuntimeException('Username 3-30 chars; password min 8.'); }
             Auth::createUser($u, $_POST['password'], $_POST['role'] === 'admin' ? 'admin' : 'operator'); flash('User added.');
@@ -119,7 +127,13 @@ echo '<div class="tabs">'; foreach ($tabs as $k => $l) { echo '<a href="?tab=' .
   <label>Company name</label><?= $in('company_name') ?><label>Address (printed on slip)</label><textarea name="company_address" rows="2"><?= e($s['company_address']) ?></textarea>
   <label>Ticket prefix</label><?= $in('ticket_prefix') ?>
   <label style="text-transform:none;font-weight:400"><input type="checkbox" name="allow_manual" value="1" <?= $s['allow_manual'] === '1' ? 'checked' : '' ?>> Allow manual weight entry when scale is unavailable (flagged on the slip)</label>
+  <h2 style="margin-top:18px">Camera snapshot (optional)</h2>
+  <label>Snapshot URL (JPEG)</label><?= $in('cam_url') ?><div class="hint">e.g. Hikvision <code>http://192.168.1.64/ISAPI/Streaming/channels/101/picture</code>. A photo is saved with each weighment as evidence.</div>
+  <div class="row"><div><label>Camera user</label><?= $in('cam_user', 'text', 'autocomplete="off"') ?></div><div><label>Camera password <?= $s['cam_pass'] !== '' ? '(saved)' : '' ?></label><input name="cam_pass" type="password" autocomplete="new-password"></div></div>
   <p><button>Save</button></p></div>
+<div class="card" style="max-width:560px"><h2>ERP REST API</h2>
+  <p class="hint">Read-only endpoint <code>api/v1/tickets.php?since_id=N</code> with header <code>Authorization: Bearer &lt;token&gt;</code>. Status: <b><?= $s['api_token_hash'] !== '' ? 'token set' : 'disabled' ?></b></p>
+  <button name="do" value="apitoken" formaction="setup.php?tab=general">Generate new token</button> <button name="do" value="apioff" class="sec" formaction="setup.php?tab=general">Disable API</button></div>
 <?php endif; ?>
 </form>
 
@@ -139,7 +153,7 @@ echo '<div class="tabs">'; foreach ($tabs as $k => $l) { echo '<a href="?tab=' .
 <tr><td>PHP</td><td><?= PHP_VERSION ?> (<?= PHP_OS_FAMILY ?>)</td></tr>
 <tr><td>Extensions</td><td>pdo_sqlite <?= extension_loaded('pdo_sqlite') ? '&#10003;' : '&#10007;' ?> &middot; sodium <?= extension_loaded('sodium') ? '&#10003;' : '&#10007;' ?> &middot; oci8 <?= function_exists('oci_connect') ? '&#10003;' : '&#10007;' ?> &middot; pdo_oci <?= extension_loaded('pdo_oci') ? '&#10003;' : '&#10007;' ?></td></tr>
 <tr><td>Scale daemon</td><td><span class="badge <?= $l['daemon_alive'] ? 'ok' : 'bad' ?>"><?= $l['daemon_alive'] ? 'RUNNING' : 'NOT RUNNING' ?></span> status=<?= e($l['status'] ?? '') ?> <?= e($l['message'] ?? '') ?></td></tr>
-<tr><td>Pending / failed Oracle</td><td><?= (int)Db::val("SELECT COUNT(*) FROM weighments WHERE status='CLOSED' AND sync_status IN ('PENDING','FAILED')") ?></td></tr>
+<tr><td>Pending / failed Oracle</td><td><?= (int)Db::val("SELECT COUNT(*) FROM weighments WHERE status IN ('CLOSED','CANCELLED') AND sync_status IN ('PENDING','FAILED')") ?></td></tr>
 <tr><td>Last sync error</td><td><?= e((string)Db::val("SELECT sync_error FROM weighments WHERE sync_error IS NOT NULL ORDER BY id DESC LIMIT 1")) ?></td></tr>
 <tr><td>Database file</td><td><?= e(WB_DB) ?> (<?= number_format(filesize(WB_DB) / 1024) ?> KB)</td></tr></table></div>
 <div class="card"><h2>Recent audit</h2><table><?php foreach (Db::all('SELECT * FROM audit ORDER BY id DESC LIMIT 25') as $a) echo '<tr><td>' . e($a['at']) . '</td><td>' . e($a['user']) . '</td><td>' . e($a['action']) . '</td><td>' . e($a['detail']) . '</td></tr>'; ?></table></div>

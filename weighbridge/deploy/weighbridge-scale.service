@@ -3,6 +3,9 @@ Description=Weighbridge scale reader (serial -> SQLite)
 After=network.target
 
 [Service]
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/www/weighbridge/data
 User=www-data
 Group=dialout
 WorkingDirectory=/var/www/weighbridge
