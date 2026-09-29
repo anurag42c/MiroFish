@@ -78,8 +78,28 @@ CREATE TABLE IF NOT EXISTS live_scale (
   scale_id INTEGER PRIMARY KEY, weight REAL, unit TEXT, stable INTEGER DEFAULT 0, raw TEXT,
   status TEXT, message TEXT, updated_at REAL, heartbeat REAL);
 SQL);
+        self::pdo()->exec(<<<'SQL'
+CREATE TABLE IF NOT EXISTS gates (id INTEGER PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+  role TEXT NOT NULL DEFAULT 'ENTRY', scale_id INTEGER, cfg TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS gate_state (gate_id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT 'UNKNOWN', updated_at REAL, close_at REAL);
+CREATE TABLE IF NOT EXISTS gate_events (id INTEGER PRIMARY KEY, at TEXT, gate_id INTEGER, gate_name TEXT, action TEXT, source TEXT,
+  user TEXT, ok INTEGER, message TEXT);
+CREATE INDEX IF NOT EXISTS ix_ge_at ON gate_events(id);
+CREATE TABLE IF NOT EXISTS gate_entries (
+  id INTEGER PRIMARY KEY, entry_no TEXT UNIQUE NOT NULL, vehicle_no TEXT NOT NULL, driver TEXT, driver_phone TEXT,
+  party TEXT, material TEXT, purpose TEXT NOT NULL DEFAULT 'DELIVERY', challan_no TEXT, remarks TEXT,
+  status TEXT NOT NULL DEFAULT 'INSIDE',            -- INSIDE, EXITED, CANCELLED
+  in_at TEXT, in_gate_id INTEGER, out_at TEXT, out_gate_id INTEGER,
+  plate_in TEXT, plate_out TEXT, plate_flag TEXT, img_in TEXT, img_out TEXT,
+  operator TEXT, exit_operator TEXT, override_note TEXT);
+CREATE INDEX IF NOT EXISTS ix_gentry_status ON gate_entries(status, vehicle_no);
+SQL);
+        $vc = array_column(self::all('PRAGMA table_info(vehicles)'), 'name');
+        foreach (['blocked' => 'INTEGER NOT NULL DEFAULT 0', 'block_reason' => 'TEXT'] as $c => $t) {
+            if (!in_array($c, $vc, true)) { self::pdo()->exec("ALTER TABLE vehicles ADD COLUMN $c $t"); }
+        }
         $cols = array_column(self::all('PRAGMA table_info(weighments)'), 'name');
-        foreach (['first_img' => 'TEXT', 'second_img' => 'TEXT', 'scale_id' => 'INTEGER', 'second_scale_id' => 'INTEGER',
+        foreach (['gate_entry_id' => 'INTEGER', 'first_img' => 'TEXT', 'second_img' => 'TEXT', 'scale_id' => 'INTEGER', 'second_scale_id' => 'INTEGER',
                   'plate_in' => 'TEXT', 'plate_in_conf' => 'REAL', 'plate_out' => 'TEXT', 'plate_out_conf' => 'REAL', 'plate_flag' => 'TEXT'] as $c => $t) {
             if (!in_array($c, $cols, true)) { self::pdo()->exec("ALTER TABLE weighments ADD COLUMN $c $t"); }
         }

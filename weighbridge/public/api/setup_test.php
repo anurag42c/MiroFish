@@ -20,6 +20,18 @@ function cfg_from_post(int $scaleId): array
 function out(bool $ok, string $msg, array $extra = []): never { echo json_encode(['ok' => $ok, 'message' => $msg] + $extra); exit; }
 
 try {
+    if (in_array($_POST['action'] ?? '', ['gate_open', 'gate_close'], true)) {
+        $gid = (int)($_POST['gate_id'] ?? 0);
+        $c = Gates::config($gid) ?? out(false, 'Unknown gate.');
+        foreach ($_POST as $k => $v) {
+            if (is_string($v) && array_key_exists($k, Gates::DEFAULTS) && !(in_array($k, Gates::SECRET_KEYS, true) && $v === '')) { $c[$k] = $v; }
+        }
+        $c['auto_open'] = isset($_POST['auto_open']) ? '1' : '0'; $c['expect_reply'] = isset($_POST['expect_reply']) ? '1' : '0';
+        $act = $_POST['action'] === 'gate_open' ? 'open' : 'close';
+        Gates::execute($c, $act);
+        Gates::log($gid, $c['gate_name'], 'test-' . $act, 'setup', true, 'OK (unsaved settings)');
+        out(true, "Sent $act to '{$c['gate_name']}'. Watch the barrier. (State is not changed by a test.)");
+    }
     $sid = (int)($_POST['scale_id'] ?? 0);
     $c = cfg_from_post($sid);
     switch ($_POST['action'] ?? '') {

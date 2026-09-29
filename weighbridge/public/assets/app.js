@@ -82,3 +82,48 @@
   }
   t(); setInterval(t, 800);
 })();
+
+// Gate screen: live gate state, open/close buttons, plate read for the entry form.
+(function () {
+  const wrap = document.querySelector('[data-gates]');
+  if (!wrap) return;
+  const csrf = wrap.dataset.csrf, msg = document.getElementById('gmsg');
+  const cls = {OPEN: 'ok', CLOSED: 'bad', UNKNOWN: ''};
+  async function refresh() {
+    try {
+      const d = await (await fetch('api/gate.php?action=state', {cache: 'no-store'})).json();
+      (d.gates || []).forEach(g => {
+        const c = document.querySelector('.gate-card[data-id="' + g.id + '"]'); if (!c) return;
+        const b = c.querySelector('[data-gstate]'); b.className = 'badge ' + (cls[g.state] || '');
+        b.textContent = g.state === 'UNKNOWN' ? 'NO COMMAND YET' : ('LAST: ' + g.state) + (g.closes_in !== null ? ' (closes in ' + g.closes_in + 's)' : '');
+        c.querySelector('[data-glast]').textContent = g.last ? (g.last.at.substring(11) + ' ' + g.last.action + ' by ' + g.last.source + (g.last.ok == 1 ? '' : ' - FAILED: ' + g.last.message)) : '';
+      });
+    } catch (e) {}
+  }
+  document.querySelectorAll('[data-gcmd]').forEach(btn => btn.addEventListener('click', async () => {
+    const id = btn.closest('.gate-card').dataset.id, act = btn.dataset.gcmd;
+    btn.disabled = true; msg.textContent = 'Sending ' + act + '...'; msg.className = 'hint';
+    const fd = new FormData(); fd.set('action', 'command'); fd.set('do', act); fd.set('gate_id', id); fd.set('csrf', csrf);
+    try {
+      const r = await (await fetch('api/gate.php', {method: 'POST', body: fd})).json();
+      msg.textContent = r.message; msg.className = 'hint ' + (r.ok ? 'okt' : 'badt');
+    } catch (e) { msg.textContent = 'Request failed'; msg.className = 'hint badt'; }
+    setTimeout(() => { btn.disabled = false; }, 800); refresh();
+  }));
+  const anpr = document.getElementById('g_anpr');
+  if (anpr) anpr.addEventListener('click', async () => {
+    const note = document.getElementById('g_note'), f = document.getElementById('g_vehicle');
+    note.textContent = 'Reading plate...'; note.className = 'hint'; anpr.disabled = true;
+    const fd = new FormData(); fd.set('action', 'anpr'); fd.set('gate_id', document.getElementById('entry_gate').value); fd.set('csrf', csrf);
+    try {
+      const r = await (await fetch('api/gate.php', {method: 'POST', body: fd})).json();
+      if (r.ok) {
+        f.value = r.plate;
+        note.textContent = 'Plate ' + r.plate + ' (' + Math.round(r.confidence * 100) + '%)' + (r.blocked ? ' - BLOCKED VEHICLE' + (r.block_reason ? ': ' + r.block_reason : '') : r.known ? ' - known vehicle' : ' - new vehicle') + (r.inside_entry_no ? ' - ALREADY INSIDE (' + r.inside_entry_no + ')' : '');
+        note.className = 'hint ' + (r.blocked || r.inside_entry_no ? 'badt' : 'okt');
+      } else { note.textContent = r.error; note.className = 'hint badt'; }
+    } catch (e) { note.textContent = 'ANPR request failed'; note.className = 'hint badt'; }
+    anpr.disabled = false;
+  });
+  refresh(); setInterval(refresh, 2000);
+})();

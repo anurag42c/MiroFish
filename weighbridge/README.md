@@ -14,6 +14,7 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 * **Oracle transfer** – every closed ticket is queued `PENDING` and pushed with an idempotent `MERGE`. If Oracle is down, tickets wait locally (weighing never stops) and are retried automatically.
 * **Several scales on one PC** – any number of indicators (each its own COM port / RS-485 line / gateway, protocol, minimum weight and camera). One service, `bin/scale_supervisor.php`, runs a reader per enabled scale and picks up scales you add in Setup. A vehicle can be weighed in on one bridge and out on another.
 * **Plate recognition (ANPR)** – per-scale IP camera → your choice of Plate Recognizer, CodeProject.AI or a local command (OpenALPR). Auto-fills the vehicle number, and checks that the truck on the bridge is the truck on the ticket.
+* **Gate entry + gate open/close interface** – a Gate screen with big OPEN / CLOSE buttons for every boom barrier (entry, exit, weighbridge in/out), a gate-pass register (who is inside, printed pass, exit), blocked-vehicle list, and links to weighing: the weighbridge exit boom opens by itself when the weighing completes, and a truck cannot leave with an open ticket. Barriers are driven through an IP relay/HTTP API, a raw TCP or USB/serial relay board, or a Modbus coil (RS-485 or TCP).
 * **Simulator mode** – installs in simulator mode so you can try everything with no hardware.
 
 ## Files
@@ -21,8 +22,8 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | Path | Purpose |
 |---|---|
 | `public/` | Web root (login, weighing, reports, masters, **setup**, ticket slip) |
-| `src/` | Db, Settings (secrets encrypted), Scales, Auth, SerialPort, ScaleParser, Modbus, ScaleReader, Camera, Anpr, OracleSync, Weighment |
-| `bin/scale_supervisor.php` | **The service to run**: starts/restarts one reader per enabled scale |
+| `src/` | Db, Settings (secrets encrypted), Scales, Gates, GateEntries, Auth, SerialPort, ScaleParser, Modbus, ScaleReader, Camera, Anpr, OracleSync, Weighment |
+| `bin/scale_supervisor.php` | **The service to run**: starts/restarts one reader per enabled scale, and performs gate auto-close |
 | `bin/scale_daemon.php` | Reader for one scale (`--scale=ID`), started by the supervisor |
 | `bin/sync_oracle.php` | Oracle push service (`--loop=30`) |
 | `sql/oracle_schema.sql` | Oracle table DDL |
@@ -155,6 +156,31 @@ The Weighing screen shows one live display per scale; click the one you are stan
 4. **Use**: press **Read** next to the vehicle box, or enable *auto-read* (reads once when a truck settles on the selected scale and the box is empty). The plate is matched to your vehicle master (stored tare, open ticket warning). On the 2nd weighing the system checks the truck on the bridge is the one on the ticket; the result is stored as OK / MISMATCH / UNREAD / NOIMG on the ticket, in reports and in Oracle.
 Plate comparison ignores spaces/dashes and OCR look-alikes (0/O, 1/I, 5/S, 8/B, 2/Z) and tolerates one wrong character on plates of 6+ characters.
 
+## Step 8d – Gates and the gate entry program
+
+**Wire it (safety first).** The PC only sends a *contact closure* to the barrier controller's OPEN / CLOSE (or a single toggle) input through a relay. Anti-crush protection (safety loop under the boom, photocell, limit switches, emergency stop) must be done by the barrier hardware, never by this software. Use a dry-contact relay, not a direct connection to the barrier's motor board.
+
+**Configure each barrier.** Setup → **Gates** → *Add a gate* → Edit:
+| Your hardware | Driver | Typical settings |
+|---|---|---|
+| IP relay / Shelly / ESP relay / barrier with a web API | HTTP | open URL `http://IP/relay/0?turn=on`, release URL `…turn=off`, Pulse 1000 ms; Hikvision barrier: PUT `/ISAPI/AccessControl/RemoteControl/door/1` + XML body |
+| Ethernet relay board (ASCII/hex over TCP) | TCP | host, port, open/close/release commands (`OPEN\r\n` or `hex:A0 01 01 A2`) |
+| USB / RS-232 relay board (e.g. LCUS-1) | Serial | its **own** COM port, baud 9600; open `hex:A0 01 01 A2`, release `hex:A0 01 00 A1` |
+| RS-485 relay module / PLC | Modbus RTU | slave id, coil address(es), its own adapter |
+| PLC / Ethernet I-O | Modbus TCP | host, port 502, unit id, coil address(es) |
+* **Pulse** = send the command, wait *pulse length*, send the *release*. Most boom controllers want a 0.5–1 s momentary contact. **Latched** = the relay stays on until the next command (one coil: ON = open, OFF = close).
+* Use **Test OPEN / Test CLOSE** in the editor (works before saving) and watch the barrier.
+* **Role** decides where it appears: *Entry gate* (register vehicles), *Exit gate* (let vehicles out), *Weighbridge entry/exit boom*. A *Weighbridge exit boom* linked to a scale opens by itself when a weighing on that scale completes (untick *Automatic opening* to disable).
+* **Auto-close after N seconds** is off by default. It is performed by the supervisor service, so that must be running. Enable it only with a safety loop fitted.
+* A gate relay cannot share a serial port with a scale; give it its own adapter. Two gates may share one relay board (e.g. channel 1 = entry, channel 2 = exit).
+* The system cannot *see* the barrier: the badge shows the **last command sent**, not a sensor reading.
+
+**Daily use – Gate screen.**
+1. Big **OPEN / CLOSE** buttons for every gate (every press is logged with user and time under *Gate activity*).
+2. **Register vehicle** at the entry gate: vehicle no (or **Read** the plate from the gate camera), driver, party, material, purpose → *Register & admit* opens the gate and can print a **gate pass**. A vehicle already inside, or one on the **blocked list** (Masters → Vehicles → Block, admin), is refused; an admin can override with a reason recorded on the pass.
+3. The truck is weighed as usual; its ticket is linked to the gate entry. *Setup → Gates → Gate entry rules* can require a gate entry before weighing (off / warn / block).
+4. At the exit, press **Exit & open** on the vehicle: with the exit rule on *block*, it is refused while a ticket is still open or (for delivery/dispatch) no weighing was completed. The pass then shows in, out, both gates, operators and tickets.
+
 ## Step 9 – Daily use
 
 1. **Weighing** page: the green display shows live weight and STABLE/MOTION. Buttons enable only when stable.
@@ -173,9 +199,9 @@ Plate comparison ignores spaces/dashes and OCR look-alikes (0/O, 1/I, 5/S, 8/B, 
 
 ## Production readiness
 
-**Verified here (automated, `php tests/run.php` - 101 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; multi-scale isolation and a supervisor that starts/stops real reader processes, the v1→v3 data upgrade, the ANPR clients against mock Plate Recognizer / CodeProject.AI / OpenALPR-style services, ticket rules with plate OK/MISMATCH/UNREAD/NOIMG under warn and block policies, plus an HTTP smoke test of every page and API, a read from a real tty device (pseudo-terminal), and backup + integrity check.
+**Verified here (automated, `php tests/run.php` - 161 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; multi-scale isolation and a supervisor that starts/stops real reader processes, the v1→v3 data upgrade, the ANPR clients against mock Plate Recognizer / CodeProject.AI / OpenALPR-style services, ticket rules with plate OK/MISMATCH/UNREAD/NOIMG under warn and block policies, gate control against a mock HTTP relay, a mock TCP relay, Modbus TCP, and fake USB/RS-485 relay boards on pseudo-terminals (exact bytes on the wire), pulse timing, auto-close, gate-pass rules and boom automation, plus an HTTP smoke test of every page and API, a read from a real tty device (pseudo-terminal), and backup + integrity check.
 
-**Not verified by the author - do these on site before go-live:** real indicator/RS-485 wiring and Modbus map, **plate-reading accuracy on your camera and trucks (only the client code is tested, against mock services - try your own pictures in Setup > Plate recognition; do not use *Block* until you have),** several real ports at once, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
+**Not verified by the author - do these on site before go-live:** real indicator/RS-485 wiring and Modbus map, **plate-reading accuracy on your camera and trucks (only the client code is tested, against mock services - try your own pictures in Setup > Plate recognition; do not use *Block* until you have),** several real ports at once, **your real barrier/relay wiring and controller behaviour (test with the barrier isolated and people clear of it)**, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
 
 Added for production: login lockout, CSP/security headers, allow-listed port/host values, `BEGIN IMMEDIATE` ticket numbering, cancellation propagated to Oracle, optional camera snapshot per weighment, read-only ERP REST API (`Setup > General`), health endpoint `api/health.php` (HTTP 503 when the scale daemon is down - point your uptime monitor at it), daily backup script:
 
@@ -201,6 +227,9 @@ See `docs/COMPARISON.md` for how this compares with public GitHub projects.
 | `ORA-12541`/`ORA-12514` | Listener/host/port or service name wrong (use service name, not SID) |
 | `ORA-00942` | Run `sql/oracle_schema.sql`; grant rights to the sync user |
 | Tickets stuck `PENDING` | Sync service not running, or Oracle unreachable – see Setup → Diagnostics |
+| Gate button says *relay unreachable / did not reply* | Check IP/port or COM port, wiring A/B, slave id; use *Test OPEN* in Setup > Gates; a Modbus board that never answers needs *Require echo reply* unticked |
+| Barrier does nothing but the log says OK | Wrong relay channel/coil, or the controller needs a longer pulse (raise *Pulse length*) |
+| Gate did not auto-close | Supervisor service not running, or *Auto-close* is 0 |
 | Windows: port busy | Another program (indicator utility) holds the COM port |
 | Scale shows *Reader not running* | Supervisor service not running (`journalctl -u weighbridge-scale`), or scale not Enabled |
 | Second scale: *already uses /dev/ttyUSB0* | Each scale needs its own port; use by-id names |

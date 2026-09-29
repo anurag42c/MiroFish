@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Auth::createUser($u, $p, 'admin');
         Settings::set('company_name', trim($_POST['company'] ?? '') ?: 'My Weighbridge');
         Scales::save(1, 'Scale 1', true, ['conn_type' => 'simulator']);   // safe default: works without hardware until configured
-        Settings::set('schema', '3');
+        Settings::set('schema', '4');
         Settings::set('installed', '1');
         flash('Installed. Log in, then open Setup to configure your scale (currently in Simulator mode).');
         redirect('login.php');

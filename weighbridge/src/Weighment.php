@@ -99,6 +99,12 @@ final class Weighment
         if ($veh === '' && $g['plate'] !== null) { $veh = $g['plate']; self::preflight($veh, $useStored); }
         if ($veh === '') { throw new RuntimeException('Vehicle number is required (camera could not read it).'); }
         self::enforcePlate($g, $veh, $override);
+        $entry = GateEntries::inside($veh);
+        $gp = Settings::get('gate_require_entry', 'off');
+        if (!$entry && $gp !== 'off') {
+            if ($gp === 'block' && !$override) { throw new RuntimeException("Vehicle $veh has no gate entry (not registered inside). Register it at the gate first, or an admin can override."); }
+            Db::audit('no_gate_entry', $veh);
+        }
         $stored = $useStored ? Db::val('SELECT tare_kg FROM vehicles WHERE reg_no = ?', [$veh]) : null;
 
         $firstType = ($in['first_type'] ?? 'GROSS') === 'TARE' ? 'TARE' : 'GROSS';
@@ -110,17 +116,18 @@ final class Weighment
             $ticket = self::nextTicket();
             $img = $g['bytes'] !== null ? Camera::save($ticket, 'in', $g['bytes']) : null;
             Db::q('INSERT INTO weighments(ticket_no, vehicle_no, party, material, direction, driver, challan_no, remarks, first_type, first_kg, first_at, first_manual,
-                   operator, created_at, scale_id, first_img, plate_in, plate_in_conf, plate_flag) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+                   operator, created_at, scale_id, first_img, plate_in, plate_in_conf, plate_flag, gate_entry_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
                 $ticket, $veh, $party, $mat, ($in['direction'] ?? 'INWARD') === 'OUTWARD' ? 'OUTWARD' : 'INWARD',
                 trim((string)($in['driver'] ?? '')), trim((string)($in['challan_no'] ?? '')), trim((string)($in['remarks'] ?? '')),
                 $useStored ? 'GROSS' : $firstType, $kg, $now, $man, Auth::user()['username'] ?? 'system', $now,
-                $scaleId, $img, $g['plate'], $g['conf'], $g['flag']]);
+                $scaleId, $img, $g['plate'], $g['conf'], $g['flag'], $entry['id'] ?? null]);
             $id = Db::id();
             self::remember('vehicles', $veh); self::remember('parties', $party); self::remember('materials', $mat);
             if ($useStored) { self::finish($id, (float)$stored, 'STORED TARE', 0, $now); }
             Db::audit('ticket_create', $ticket);
             $pdo->exec('COMMIT');
         } catch (Throwable $e) { if ($pdo->inTransaction()) { $pdo->exec('ROLLBACK'); } throw $e; }
+        if ($useStored) { try { Gates::onTicketClosed($scaleId, $ticket); } catch (Throwable) {} }   // single-pass ticket is complete now
         return $id;
     }
 
@@ -150,6 +157,7 @@ final class Weighment
         Db::q('UPDATE weighments SET second_scale_id = ?, second_img = ?, plate_out = ?, plate_out_conf = ?, plate_flag = ? WHERE id = ?',
             [$scaleId, $img, $g['plate'], $g['conf'], $flag, $id]);
         Db::audit('ticket_close', $w['ticket_no']);
+        try { Gates::onTicketClosed($scaleId, $w['ticket_no']); } catch (Throwable) {}   // a barrier fault never undoes a weighing
     }
 
     private static function finish(int $id, float $kg, ?string $note, int $manual, string $now): void

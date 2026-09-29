@@ -33,6 +33,9 @@ final class Settings
         'anpr_url' => '', 'anpr_key' => '', 'anpr_region' => '', 'anpr_command' => '',
         'anpr_min_conf' => '0.6', 'anpr_policy' => 'warn',   // off | warn | block
         'anpr_auto' => '0',
+        // Gate entry
+        'gate_require_entry' => 'off',  // off | warn | block : weighing needs a gate entry (vehicle inside)
+        'gate_exit_policy' => 'warn',   // off | warn | block : exit needs completed weighment, no open ticket
         // oracle
         'ora_enabled' => '0', 'ora_host' => '', 'ora_port' => '1521', 'ora_service' => '',
         'ora_user' => '', 'ora_pass' => '', 'ora_table' => 'WEIGHBRIDGE_TICKETS', 'ora_batch' => '50',

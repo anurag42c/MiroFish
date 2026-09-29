@@ -24,6 +24,14 @@ switch ($path) {
         $p = plate_in_upload();
         echo json_encode(['success' => true, 'predictions' => $p ? [['label' => "Plate: $p", 'plate' => $p, 'confidence' => 0.88]] : [], 'code' => 200]);
         break;
+    case '/relay/open': case '/relay/close': case '/relay/release':     // IP relay: log every hit, optional Basic auth on /relay/auth/*
+        file_put_contents(getenv('RELAY_LOG') ?: '/dev/null', sprintf("%.3f %s %s %s\n", microtime(true), $_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI'], file_get_contents('php://input')), FILE_APPEND);
+        echo '{"ok":true}'; break;
+    case '/relay/auth/open':
+        if (($_SERVER['PHP_AUTH_USER'] ?? '') !== 'gateuser' || ($_SERVER['PHP_AUTH_PW'] ?? '') !== 'gatepass') { http_response_code(401); header('WWW-Authenticate: Basic realm="r"'); break; }
+        file_put_contents(getenv('RELAY_LOG') ?: '/dev/null', sprintf("%.3f AUTHOK\n", microtime(true)), FILE_APPEND);
+        echo 'ok'; break;
+    case '/relay/fail': http_response_code(503); echo 'busy'; break;
     case '/boom': http_response_code(500); echo 'oops'; break;
     default: http_response_code(404);
 }

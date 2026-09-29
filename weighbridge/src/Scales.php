@@ -78,12 +78,25 @@ final class Scales
         Db::q('UPDATE weighments SET scale_id = 1 WHERE scale_id IS NULL');
     }
 
+    /** Is any enabled serial scale using this port? (A gate relay may not share it: the reader keeps the port open.) */
+    public static function usesSerial(string $port): bool
+    {
+        foreach (Db::all('SELECT cfg FROM scales WHERE enabled = 1') as $s) {
+            $c = array_merge(Settings::DEFAULTS, json_decode((string)$s['cfg'], true) ?: []);
+            if ($c['conn_type'] === 'serial' && strtolower((string)$c['serial_port']) === strtolower($port)) { return true; }
+        }
+        return false;
+    }
+
     /** Two enabled scales cannot share one serial port or one gateway endpoint. */
     private static function assertNoPortClash(int $id, bool $enabled, array $cfg): void
     {
         if (!$enabled) { return; }
         $mine = self::endpoint(array_merge(Settings::DEFAULTS, $cfg));
         if ($mine === null) { return; }
+        if (($cfg['conn_type'] ?? '') === 'serial' && Gates::usesSerial((string)$cfg['serial_port'])) {
+            throw new RuntimeException("$mine is used by a gate relay. Each device needs its own serial adapter.");
+        }
         foreach (Db::all('SELECT id, name, cfg FROM scales WHERE enabled = 1 AND id <> ?', [$id]) as $o) {
             if (self::endpoint(array_merge(Settings::DEFAULTS, json_decode((string)$o['cfg'], true) ?: [])) === $mine) {
                 throw new RuntimeException("'{$o['name']}' already uses $mine. Each scale needs its own port / gateway address.");

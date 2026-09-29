@@ -32,3 +32,6 @@ th{background:#f0f3f8;font-size:12px;text-transform:uppercase;color:var(--mut)}t
 .scale-card .display{font-size:38px;padding:10px 14px}.scale-card .display small{font-size:16px}
 .okt{color:var(--ok)}.badt{color:var(--bad)}.warnt{color:var(--warn);font-weight:700}
 .badge.plate{background:#5b3fd4}
+.gate-card{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:12px}
+.gate-card .nm{font-weight:700;margin-bottom:4px;display:flex;justify-content:space-between;gap:8px}
+.gbtns{display:flex;gap:8px;margin:10px 0 4px}.gbtns button{flex:1;padding:14px 8px;font-size:16px}

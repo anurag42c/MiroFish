@@ -20,6 +20,19 @@ final class Modbus
         return $f . pack('v', self::crc16($f));   // CRC is little-endian on the wire
     }
 
+    /** Function 5: write one coil. Relay boards/PLCs echo the request as the reply. */
+    public static function writeCoil(int $slave, int $addr, bool $on): string
+    {
+        $f = pack('CCnn', $slave, 5, $addr, $on ? 0xFF00 : 0x0000);
+        return $f . pack('v', self::crc16($f));
+    }
+
+    /** Modbus TCP (MBAP header, no CRC) write-single-coil frame. */
+    public static function writeCoilTcp(int $tid, int $unit, int $addr, bool $on): string
+    {
+        return pack('nnnCCnn', $tid, 0, 6, $unit, 5, $addr, $on ? 0xFF00 : 0x0000);
+    }
+
     /** Returns register values (unsigned 16-bit) or throws. */
     public static function parse(string $resp, int $slave, int $func, int $count): array
     {

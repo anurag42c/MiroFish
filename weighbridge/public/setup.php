@@ -4,11 +4,13 @@ Auth::require(true);
 
 $tab = $_GET['tab'] ?? 'scales';
 $sid = (int)($_GET['id'] ?? 0);
-$tabs = ['scales' => 'Scales', 'anpr' => 'Plate recognition', 'oracle' => 'Oracle transfer', 'general' => 'General', 'users' => 'Users', 'diag' => 'Diagnostics'];
+$tabs = ['scales' => 'Scales', 'gates' => 'Gates', 'anpr' => 'Plate recognition', 'oracle' => 'Oracle transfer', 'general' => 'General', 'users' => 'Users', 'diag' => 'Diagnostics'];
 if ($tab === 'scale') { if (!Scales::find($sid)) { $tab = 'scales'; } }
+elseif ($tab === 'gate') { if (!Gates::find($sid)) { $tab = 'gates'; } }
 elseif (!isset($tabs[$tab])) { $tab = 'scales'; }
 
 $fields = [
+    'gates' => ['gate_require_entry', 'gate_exit_policy'],
     'anpr' => ['anpr_provider', 'anpr_url', 'anpr_key', 'anpr_region', 'anpr_command', 'anpr_min_conf', 'anpr_policy'],
     'oracle' => ['ora_host', 'ora_port', 'ora_service', 'ora_user', 'ora_pass', 'ora_table', 'ora_batch'],
     'general' => ['company_name', 'company_address', 'ticket_prefix'],
@@ -33,6 +35,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Scales::save($sid, $name, isset($_POST['enabled']), $cfg);
             Db::audit('scale_save', "$sid $name");
             flash('Saved. The reader picks up changes within 5 seconds (new scales start within 2 seconds).');
+        } elseif ($tab === 'gate' && $do === '') {
+            $post = fn(string $k) => trim((string)($_POST[$k] ?? ''));
+            foreach (['http_open_url', 'http_close_url', 'http_release_url', 'cam_url'] as $k) {
+                if ($post($k) !== '' && !preg_match('#^https?://#i', $post($k))) { throw new RuntimeException("$k must start with http:// or https://"); }
+            }
+            if ($post('driver') === 'serial' || $post('driver') === 'modbus_rtu') { if (!valid_port($post('serial_port'))) { throw new RuntimeException('Serial port must look like COM5 or /dev/ttyUSB1'); } }
+            if (in_array($post('driver'), ['tcp', 'modbus_tcp'], true) && !valid_host($post('tcp_host'))) { throw new RuntimeException('Invalid relay host name / IP'); }
+            foreach (['open_cmd', 'close_cmd', 'release_cmd'] as $k) { if ($post($k) !== '') { Gates::bytes($post($k)); } }   // validates hex syntax
+            $cfg = [];
+            foreach (array_keys(Gates::DEFAULTS) as $k) { if (isset($_POST[$k])) { $cfg[$k] = in_array($k, ['open_cmd', 'close_cmd', 'release_cmd', 'http_open_body', 'http_close_body', 'http_release_body'], true) ? (string)$_POST[$k] : $post($k); } }
+            $cfg['auto_open'] = isset($_POST['auto_open']) ? '1' : '0'; $cfg['expect_reply'] = isset($_POST['expect_reply']) ? '1' : '0';
+            Gates::save($sid, $post('name') ?: "Gate $sid", isset($_POST['enabled']), $post('role'), (int)($_POST['scale_id'] ?? 0) ?: null, $cfg);
+            Db::audit('gate_save', "$sid " . $post('name'));
+            flash('Saved.');
+        } elseif ($do === 'addgate') {
+            $id = Gates::create(trim($_POST['name'] ?? '') ?: 'New gate'); flash('Gate added (disabled, Simulator). Configure it, then tick Enabled.'); redirect("setup.php?tab=gate&id=$id");
+        } elseif ($do === 'delgate') {
+            Gates::delete((int)$_POST['id']); Db::audit('gate_delete', (string)(int)$_POST['id']); flash('Gate deleted.');
+        } elseif ($do === 'toggle_gate') {
+            $x = Gates::find((int)$_POST['id']); Gates::save((int)$x['id'], $x['name'], !$x['enabled'], $x['role'], $x['scale_id'] ? (int)$x['scale_id'] : null, []); flash('Updated.');
         } elseif ($do === 'addscale') {
             $n = trim($_POST['name'] ?? '') ?: 'New scale'; $id = Scales::create($n); flash("Scale added (disabled, Simulator). Configure it, then tick Enabled."); redirect("setup.php?tab=scale&id=$id");
         } elseif ($do === 'delscale') {
@@ -66,15 +88,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Db::q('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($_POST['password'], PASSWORD_DEFAULT), (int)$_POST['id']]); flash('Password changed.');
         }
     } catch (Throwable $e) { flash(str_contains($e->getMessage(), 'UNIQUE') ? 'Already exists.' : $e->getMessage(), 'err'); }
-    redirect('setup.php?tab=' . $tab . ($tab === 'scale' ? "&id=$sid" : ''));
+    redirect('setup.php?tab=' . $tab . (in_array($tab, ['scale', 'gate'], true) ? "&id=$sid" : ''));
 }
 
-Settings::reset(); $s = $tab === 'scale' ? Scales::config($sid) : Settings::all();
+Settings::reset(); $s = $tab === 'scale' ? Scales::config($sid) : ($tab === 'gate' ? Gates::config($sid) : Settings::all());
 $sel = fn(string $k, array $opts) => implode('', array_map(fn($v, $l) => '<option value="' . e((string)$v) . '"' . ($s[$k] == $v ? ' selected' : '') . '>' . e($l) . '</option>', array_keys($opts), $opts));
 $in = fn(string $k, string $type = 'text', string $extra = '') => '<input name="' . $k . '" type="' . $type . '" value="' . ($type === 'password' ? '' : e($s[$k])) . '" ' . $extra . '>';
 
 page_head('Setup');
-echo '<div class="tabs">'; foreach ($tabs as $k => $l) { echo '<a href="?tab=' . $k . '"' . (($k === $tab || ($tab === 'scale' && $k === 'scales')) ? ' class="on"' : '') . '>' . $l . '</a>'; } echo '</div>';
+echo '<div class="tabs">'; foreach ($tabs as $k => $l) { echo '<a href="?tab=' . $k . '"' . (($k === $tab || ($tab === 'scale' && $k === 'scales') || ($tab === 'gate' && $k === 'gates')) ? ' class="on"' : '') . '>' . $l . '</a>'; } echo '</div>';
 
 if ($tab === 'scales'): ?>
 <div class="card"><h2>Scales on this PC</h2>
@@ -141,6 +163,77 @@ if ($tab === 'scales'): ?>
 <div class="card"><h2>Live data from this scale's reader</h2>
   <div class="display" data-live="weight" data-scale="<?= $sid ?>" style="font-size:36px">---<small>kg</small></div>
   <div class="statusline"><span class="badge" data-live="stable">...</span><span data-live="msg"></span><span style="margin-left:auto">Raw: <code data-live="raw"></code></span></div></div>
+</form>
+
+<?php elseif ($tab === 'gates'): ?>
+<div class="card"><h2>Gates / boom barriers</h2>
+<table><tr><th>#</th><th>Name</th><th>Role</th><th>Driver</th><th>Last command</th><th></th></tr>
+<?php foreach (Gates::all() as $gt): $gc = Gates::config((int)$gt['id']); $st = Gates::state((int)$gt['id']); ?>
+<tr><td><?= (int)$gt['id'] ?></td><td><b><?= e($gt['name']) ?></b> <?= $gt['enabled'] ? '' : '<span class="badge">disabled</span>' ?></td><td><?= e(Gates::ROLES[$gt['role']] ?? '') ?></td><td><?= e($gc['driver']) ?> &middot; <?= e($gc['mode']) ?></td>
+  <td><?= e($st['state']) ?></td>
+  <td style="display:flex;gap:4px"><a class="btn sec" href="?tab=gate&id=<?= (int)$gt['id'] ?>">Edit</a>
+    <form method="post"><?= csrf_field() ?><input type="hidden" name="do" value="toggle_gate"><input type="hidden" name="id" value="<?= (int)$gt['id'] ?>"><button class="sec"><?= $gt['enabled'] ? 'Disable' : 'Enable' ?></button></form>
+    <form method="post" onsubmit="return confirm('Delete this gate?')"><?= csrf_field() ?><input type="hidden" name="do" value="delgate"><input type="hidden" name="id" value="<?= (int)$gt['id'] ?>"><button class="sec">Delete</button></form></td></tr>
+<?php endforeach; ?></table>
+<p class="hint"><b>Safety:</b> the software only sends open/close pulses. Anti-crush protection (safety loop, photocell, barrier limit switches, emergency stop) must be done by the barrier hardware. Auto-close is off by default; use it only with a safety loop fitted.</p></div>
+<div class="grid g2"><div class="card"><h2>Add a gate</h2><form method="post"><?= csrf_field() ?><input type="hidden" name="do" value="addgate">
+<label>Name (e.g. "Main gate IN")</label><input name="name" required><p><button>Add</button></p></form></div>
+<form class="card" method="post"><?= csrf_field() ?><h2>Gate entry rules</h2>
+  <label>Weighing requires a gate entry (vehicle registered inside)</label><select name="gate_require_entry"><?= $sel('gate_require_entry', ['off' => 'No', 'warn' => 'Warn (audit only)', 'block' => 'Yes - block; admin can override']) ?></select>
+  <label>Exit requires completed weighment and no open ticket</label><select name="gate_exit_policy"><?= $sel('gate_exit_policy', ['off' => 'No', 'warn' => 'Warn (audit + note on the pass)', 'block' => 'Yes - block; admin can override']) ?></select>
+  <p><button>Save</button></p></form></div>
+
+<?php elseif ($tab === 'gate'): $gt = Gates::find($sid); ?>
+<form id="f" method="post"><?= csrf_field() ?><input type="hidden" name="gate_id" value="<?= $sid ?>">
+<div class="grid g2">
+<div class="card"><h2>Gate #<?= $sid ?></h2>
+  <div class="row"><div><label>Name</label><input name="name" value="<?= e($gt['name']) ?>" required></div>
+    <div><label>Status</label><label style="text-transform:none;font-weight:400"><input type="checkbox" name="enabled" value="1" <?= $gt['enabled'] ? 'checked' : '' ?>> Enabled</label></div></div>
+  <div class="row"><div><label>Role</label><select name="role"><?php foreach (Gates::ROLES as $k => $l) echo '<option value="' . $k . '"' . ($gt['role'] === $k ? ' selected' : '') . '>' . e($l) . '</option>'; ?></select></div>
+    <div><label>Linked scale (weighbridge booms)</label><select name="scale_id"><option value="">Any scale</option><?php foreach (Scales::all() as $sc) echo '<option value="' . (int)$sc['id'] . '"' . ((int)$gt['scale_id'] === (int)$sc['id'] ? ' selected' : '') . '>' . e($sc['name']) . '</option>'; ?></select></div></div>
+  <div class="hint">Weighbridge exit boom: opens automatically when a weighing on the linked scale completes.</div>
+  <label>How is the barrier controlled?</label><select name="driver" id="g_driver"><?= $sel('driver', Gates::DRIVERS) ?></select>
+  <div class="row"><div><label>Action type</label><select name="mode"><?= $sel('mode', ['pulse' => 'Pulse (momentary contact, then release)', 'latched' => 'Latched (hold until next command)']) ?></select></div>
+    <div><label>Pulse length (ms)</label><?= $in('pulse_ms', 'number', 'min="50" max="10000"') ?></div></div>
+  <div class="row"><div><label>Auto-close after (s, 0 = off)</label><?= $in('auto_close_sec', 'number', 'min="0" max="3600"') ?></div>
+    <div><label>Automation</label><label style="text-transform:none;font-weight:400"><input type="checkbox" name="auto_open" value="1" <?= $s['auto_open'] === '1' ? 'checked' : '' ?>> Allow automatic opening (weighing done)</label></div></div>
+  <div class="hint">Auto-close runs in the supervisor service. Only enable it with a safety loop fitted.</div>
+  <h2 style="margin-top:14px">Camera at this gate (optional, for plate reading)</h2>
+  <label>Snapshot URL (JPEG)</label><?= $in('cam_url') ?>
+  <div class="row"><div><label>Camera user</label><?= $in('cam_user', 'text', 'autocomplete="off"') ?></div><div><label>Camera password <?= $s['cam_pass'] !== '' ? '(saved)' : '' ?></label><input name="cam_pass" type="password" autocomplete="new-password"></div></div>
+</div>
+
+<div class="card"><h2>Connection</h2>
+  <div class="d_http">
+    <label>Open URL</label><?= $in('http_open_url') ?><label>Close URL</label><?= $in('http_close_url') ?><label>Release URL (optional, after the pulse)</label><?= $in('http_release_url') ?>
+    <div class="row"><div><label>Method</label><select name="http_method"><?= $sel('http_method', ['GET' => 'GET', 'POST' => 'POST', 'PUT' => 'PUT']) ?></select></div>
+      <div><label>User</label><?= $in('http_user', 'text', 'autocomplete="off"') ?></div><div><label>Password <?= $s['http_pass'] !== '' ? '(saved)' : '' ?></label><input name="http_pass" type="password" autocomplete="new-password"></div></div>
+    <label>Open body (POST/PUT)</label><?= $in('http_open_body') ?><label>Close body</label><?= $in('http_close_body') ?><label>Release body</label><?= $in('http_release_body') ?>
+    <div class="hint">Shelly relay: open <code>http://IP/relay/0?turn=on</code>, release <code>http://IP/relay/0?turn=off</code>. Success = HTTP 2xx. Hikvision barrier: PUT <code>/ISAPI/AccessControl/RemoteControl/door/1</code> with body <code>&lt;RemoteControlDoor&gt;&lt;cmd&gt;open&lt;/cmd&gt;&lt;/RemoteControlDoor&gt;</code>.</div>
+  </div>
+  <div class="d_tcp d_modbus_tcp"><div class="row"><div><label>Relay host / IP</label><?= $in('tcp_host') ?></div><div><label>TCP port</label><?= $in('tcp_port', 'number') ?></div></div></div>
+  <div class="d_serial d_modbus_rtu">
+    <label>Serial port</label><?= $in('serial_port') ?>
+    <div class="row"><div><label>Baud</label><select name="baud"><?= $sel('baud', array_combine([1200, 2400, 4800, 9600, 19200, 38400, 115200], [1200, 2400, 4800, 9600, 19200, 38400, 115200])) ?></select></div>
+      <div><label>Data bits</label><select name="data_bits"><?= $sel('data_bits', [7 => 7, 8 => 8]) ?></select></div>
+      <div><label>Parity</label><select name="parity"><?= $sel('parity', ['N' => 'None', 'E' => 'Even', 'O' => 'Odd']) ?></select></div>
+      <div><label>Stop bits</label><select name="stop_bits"><?= $sel('stop_bits', [1 => 1, 2 => 2]) ?></select></div></div>
+    <div class="hint">A relay needs its own adapter: it cannot share a port with a scale.</div>
+  </div>
+  <div class="d_tcp d_serial">
+    <label>Open command</label><?= $in('open_cmd') ?><label>Close command</label><?= $in('close_cmd') ?><label>Release command (optional, after the pulse)</label><?= $in('release_cmd') ?>
+    <div class="hint">Text with escapes (<code>OPEN\r\n</code>) or hex: <code>hex:A0 01 01 A2</code>. USB relay LCUS-1: open <code>hex:A0 01 01 A2</code>, release/close <code>hex:A0 01 00 A1</code>.</div>
+  </div>
+  <div class="d_modbus_rtu d_modbus_tcp">
+    <div class="row"><div><label>Slave / unit id</label><?= $in('modbus_slave', 'number') ?></div><div><label>Open coil (0-based)</label><?= $in('coil_open', 'number') ?></div><div><label>Close coil (blank = same coil OFF)</label><?= $in('coil_close', 'number') ?></div></div>
+    <label style="text-transform:none;font-weight:400"><input type="checkbox" name="expect_reply" value="1" <?= $s['expect_reply'] === '1' ? 'checked' : '' ?>> Require the relay's echo reply (untick only for boards that never answer)</label>
+    <div class="hint">One coil, latched: ON = open, OFF = close. Two coils, pulse: each coil is pulsed ON then OFF.</div>
+  </div>
+  <div class="d_simulator"><p class="hint">Simulator: commands are only recorded. Use it to try the screens.</p></div>
+</div>
+</div>
+<p><button>Save</button> <a class="btn sec" href="?tab=gates">Back</a> <button type="button" class="sec" data-test="gate_open">Test OPEN (uses the values above)</button> <button type="button" class="sec" data-test="gate_close">Test CLOSE</button></p>
+<pre class="log" id="out" style="display:none"></pre>
 </form>
 
 <?php elseif ($tab === 'anpr'): ?>
@@ -226,6 +319,8 @@ function vis() {
     $$('.ascii').forEach(e => e.style.display = p.value === 'ascii' ? '' : 'none');
     $$('.modbus').forEach(e => e.style.display = p.value === 'modbus_rtu' ? '' : 'none');
   }
+  const gd = $('#g_driver');
+  if (gd) { $$('[class*="d_"]').forEach(e => { if ([...e.classList].some(c => c.startsWith('d_'))) e.style.display = e.classList.contains('d_' + gd.value) ? '' : 'none'; }); }
   const a = $('#anpr_provider');
   if (a) {
     $$('.p_url').forEach(e => e.style.display = ['platerecognizer', 'codeproject'].includes(a.value) ? '' : 'none');

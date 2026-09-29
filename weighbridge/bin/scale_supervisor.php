@@ -52,7 +52,10 @@ while ($running) {
         if ($p) { $children[$id] = ['proc' => $p, 'started' => microtime(true)]; log_line("scale $id reader started"); }
         else { $retryAt[$id] = microtime(true) + 10; log_line("scale $id: cannot start reader"); }
     }
-    for ($i = 0; $i < 20 && $running; $i++) { usleep(100000); }
+    for ($i = 0; $i < 20 && $running; $i++) {
+        usleep(100000);
+        if ($i % 5 === 4) { try { Gates::runDue(); } catch (Throwable $e) { log_line('gate auto-close error: ' . $e->getMessage()); } }   // every 0.5 s
+    }
 }
 log_line('supervisor stopping');
 foreach ($children as $c) { proc_terminate($c['proc']); }
