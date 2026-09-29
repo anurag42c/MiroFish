@@ -18,6 +18,10 @@ CREATE TABLE WEIGHBRIDGE_TICKETS (
     STATUS            VARCHAR2(12),
     OPERATOR          VARCHAR2(50),
     LOCAL_ID          NUMBER(12),
+    SCALE_NAME        VARCHAR2(100),
+    PLATE_IN          VARCHAR2(30),
+    PLATE_OUT         VARCHAR2(30),
+    PLATE_FLAG        VARCHAR2(12),
     SYNCED_AT         TIMESTAMP DEFAULT SYSTIMESTAMP,
     CONSTRAINT PK_WB_TICKETS PRIMARY KEY (TICKET_NO)
 );
@@ -30,3 +34,6 @@ CREATE INDEX IX_WB_TICKETS_DATE ON WEIGHBRIDGE_TICKETS (SECOND_WEIGHT_AT);
 -- GRANT CREATE SESSION TO wb_sync;
 -- Then create the table above while connected as wb_sync.
 -- The app only needs SELECT/INSERT/UPDATE on WEIGHBRIDGE_TICKETS and SELECT on V$VERSION (for the Test button; optional).
+
+-- UPGRADE for a table created with an earlier version of this file (adds multi-scale + ANPR columns):
+-- ALTER TABLE WEIGHBRIDGE_TICKETS ADD (SCALE_NAME VARCHAR2(100), PLATE_IN VARCHAR2(30), PLATE_OUT VARCHAR2(30), PLATE_FLAG VARCHAR2(12));

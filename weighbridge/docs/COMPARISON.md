@@ -30,9 +30,14 @@ was compared; no third-party code was copied into this project.
 * **Single-pass with stored tare** and "smaller weight is the tare" style safeguard (gross must exceed tare).
 * **Backups** (Weighing-Scale2 "Backup Query Insert") - consistent SQLite snapshot with integrity check and retention.
 
+## Added later
+
+* **ANPR** – pluggable client (Plate Recognizer, CodeProject.AI, local command such as OpenALPR). Auto-fill of the vehicle number, master lookup, and a second-weighing identity check with warn/block policy and admin override. The OCR itself is delegated to the service you pick; this project does not ship its own model.
+* **Several scales on one PC** – per-scale connection/parser/camera, a supervisor that runs one reader per enabled scale, cross-bridge tickets (in on one, out on another), duplicate-port protection.
+
 ## Not implemented (honest gaps)
 
-* ANPR / vehicle colour recognition (needs an ML service; the snapshot hook is where it would plug in).
-* Several scales on one PC (the daemon reads one indicator; run a second copy with a different `WB_DATA` for a second bridge).
+* Vehicle make/colour recognition (the premium Weighing-Scale2 feature); only the plate is read.
+* Accuracy claims for ANPR - depends on camera, lighting and service; tested here only with mock services.
 * Legal-for-trade approval, printer-specific slip formats, boom-barrier/traffic-light I/O.
 * Not verified against real hardware or a real Oracle instance (see README "Production readiness").

@@ -80,18 +80,19 @@ final class OracleSync
           WHEN MATCHED THEN UPDATE SET VEHICLE_NO=:vehicle_no, PARTY=:party, MATERIAL=:material, DIRECTION=:direction, DRIVER=:driver,
                CHALLAN_NO=:challan_no, REMARKS=:remarks, GROSS_KG=:gross_kg, TARE_KG=:tare_kg, NET_KG=:net_kg,
                FIRST_WEIGHT_AT={$ts('first_at')}, SECOND_WEIGHT_AT={$ts('second_at')}, STATUS=:status, OPERATOR=:operator,
-               LOCAL_ID=:local_id, SYNCED_AT=SYSTIMESTAMP
+               LOCAL_ID=:local_id, SCALE_NAME=:scale_name, PLATE_IN=:plate_in, PLATE_OUT=:plate_out, PLATE_FLAG=:plate_flag, SYNCED_AT=SYSTIMESTAMP
           WHEN NOT MATCHED THEN INSERT (TICKET_NO, VEHICLE_NO, PARTY, MATERIAL, DIRECTION, DRIVER, CHALLAN_NO, REMARKS, GROSS_KG, TARE_KG, NET_KG,
-               FIRST_WEIGHT_AT, SECOND_WEIGHT_AT, STATUS, OPERATOR, LOCAL_ID, SYNCED_AT)
+               FIRST_WEIGHT_AT, SECOND_WEIGHT_AT, STATUS, OPERATOR, LOCAL_ID, SCALE_NAME, PLATE_IN, PLATE_OUT, PLATE_FLAG, SYNCED_AT)
           VALUES (:ticket_no, :vehicle_no, :party, :material, :direction, :driver, :challan_no, :remarks, :gross_kg, :tare_kg, :net_kg,
-               {$ts('first_at')}, {$ts('second_at')}, :status, :operator, :local_id, SYSTIMESTAMP)";
+               {$ts('first_at')}, {$ts('second_at')}, :status, :operator, :local_id, :scale_name, :plate_in, :plate_out, :plate_flag, SYSTIMESTAMP)";
         $n = fn($x) => ($x === '' || $x === null) ? null : $x;
         $this->run($sql, [
             'ticket_no' => $w['ticket_no'], 'vehicle_no' => $w['vehicle_no'], 'party' => $n($w['party']), 'material' => $n($w['material']),
             'direction' => $w['direction'], 'driver' => $n($w['driver']), 'challan_no' => $n($w['challan_no']), 'remarks' => $n($w['remarks']),
             'gross_kg' => (string)$w['gross_kg'], 'tare_kg' => (string)$w['tare_kg'], 'net_kg' => (string)$w['net_kg'],
             'first_at' => $w['first_at'], 'second_at' => $w['second_at'], 'status' => $w['status'], 'operator' => $n($w['operator']),
-            'local_id' => (string)$w['id'],
+            'local_id' => (string)$w['id'], 'scale_name' => $n(Scales::find((int)$w['scale_id'])['name'] ?? null),
+            'plate_in' => $n($w['plate_in']), 'plate_out' => $n($w['plate_out']), 'plate_flag' => $n($w['plate_flag']),
         ]);
     }
 

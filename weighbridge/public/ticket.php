@@ -14,6 +14,8 @@ page_head('Ticket ' . $w['ticket_no']);
     <tr><th>Ticket no</th><td><?= e($w['ticket_no']) ?></td><th>Direction</th><td><?= e($w['direction']) ?></td></tr>
     <tr><th>Vehicle</th><td><?= e($w['vehicle_no']) ?></td><th>Driver</th><td><?= e($w['driver']) ?></td></tr>
     <tr><th>Party</th><td><?= e($w['party']) ?></td><th>Material</th><td><?= e($w['material']) ?></td></tr>
+    <tr><th>Scale in / out</th><td><?= e((string)(Scales::find((int)$w['scale_id'])['name'] ?? '-')) ?> / <?= e((string)(Scales::find((int)$w['second_scale_id'])['name'] ?? '-')) ?></td>
+        <th>Plate check</th><td><?php if ($w['plate_flag']): ?><span class="badge <?= ['OK' => 'ok', 'MISMATCH' => 'bad', 'UNREAD' => 'warn'][$w['plate_flag']] ?? '' ?>"><?= e($w['plate_flag']) ?></span> <small><?= e(trim(($w['plate_in'] ?? '') . ' / ' . ($w['plate_out'] ?? ''), ' /')) ?></small><?php else: ?>-<?php endif; ?></td></tr>
     <tr><th>Challan</th><td><?= e($w['challan_no']) ?></td><th>Operator</th><td><?= e($w['operator']) ?></td></tr>
     <tr><th>1st (<?= e($w['first_type']) ?>)</th><td><?= $kg($w['first_kg']) ?><br><small><?= e($w['first_at']) ?><?= $w['first_manual'] ? ' (manual)' : '' ?></small></td>
         <th>2nd</th><td><?= $kg($w['second_kg']) ?><br><small><?= e($w['second_at']) ?><?= $w['second_manual'] ? ' (manual)' : '' ?></small></td></tr>

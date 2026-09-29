@@ -7,7 +7,7 @@ define('WB_DB', WB_DATA . '/weighbridge.sqlite');
 
 date_default_timezone_set(getenv('WB_TZ') ?: 'Asia/Kolkata');
 
-foreach (['Db', 'Settings', 'Auth', 'SerialPort', 'ScaleParser', 'Modbus', 'ScaleReader', 'OracleSync', 'Camera', 'Weighment'] as $c) {
+foreach (['Db', 'Settings', 'Auth', 'SerialPort', 'ScaleParser', 'Modbus', 'ScaleReader', 'Scales', 'OracleSync', 'Camera', 'Anpr', 'Weighment'] as $c) {
     require_once __DIR__ . "/$c.php";
 }
 

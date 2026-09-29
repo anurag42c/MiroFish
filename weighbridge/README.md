@@ -12,6 +12,8 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 * **Web UI** – live weight display, two-pass (gross/tare) tickets, single-pass with stored tare, printing slips, masters, reports + CSV, users/roles, audit log.
 * **Setup page** – port, baud, parity, protocol (ASCII continuous / poll command / Modbus RTU), regex parser, stability rules, TCP gateway, Oracle credentials, *Test* buttons.
 * **Oracle transfer** – every closed ticket is queued `PENDING` and pushed with an idempotent `MERGE`. If Oracle is down, tickets wait locally (weighing never stops) and are retried automatically.
+* **Several scales on one PC** – any number of indicators (each its own COM port / RS-485 line / gateway, protocol, minimum weight and camera). One service, `bin/scale_supervisor.php`, runs a reader per enabled scale and picks up scales you add in Setup. A vehicle can be weighed in on one bridge and out on another.
+* **Plate recognition (ANPR)** – per-scale IP camera → your choice of Plate Recognizer, CodeProject.AI or a local command (OpenALPR). Auto-fills the vehicle number, and checks that the truck on the bridge is the truck on the ticket.
 * **Simulator mode** – installs in simulator mode so you can try everything with no hardware.
 
 ## Files
@@ -19,8 +21,9 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | Path | Purpose |
 |---|---|
 | `public/` | Web root (login, weighing, reports, masters, **setup**, ticket slip) |
-| `src/` | Db, Settings (secrets encrypted), Auth, SerialPort, ScaleParser, Modbus, ScaleReader, OracleSync, Weighment |
-| `bin/scale_daemon.php` | Serial/TCP reader service |
+| `src/` | Db, Settings (secrets encrypted), Scales, Auth, SerialPort, ScaleParser, Modbus, ScaleReader, Camera, Anpr, OracleSync, Weighment |
+| `bin/scale_supervisor.php` | **The service to run**: starts/restarts one reader per enabled scale |
+| `bin/scale_daemon.php` | Reader for one scale (`--scale=ID`), started by the supervisor |
 | `bin/sync_oracle.php` | Oracle push service (`--loop=30`) |
 | `sql/oracle_schema.sql` | Oracle table DDL |
 | `bin/backup.php` | Online SQLite backup with integrity check |
@@ -129,11 +132,28 @@ Log in as admin → **Setup → Scale connection**:
 sudo cp deploy/*.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now weighbridge-scale weighbridge-oracle-sync
-journalctl -u weighbridge-scale -f                      # see errors
+journalctl -u weighbridge-scale -f                      # supervisor messages; per-scale logs are in data/logs/scale_<id>.log
 ```
 **Windows**: install NSSM, edit paths in `deploy\windows-install.bat`, run as Administrator (also installs the web UI as a service).
-**Manual test**: `php bin/scale_daemon.php --debug` prints every reading.
+**Manual test**: `php bin/scale_daemon.php --scale=1 --debug` prints every reading of scale 1 (stop the supervisor first if that scale uses a real port).
 **Alternative to the sync service**: cron `* * * * * php /var/www/weighbridge/bin/sync_oracle.php`.
+
+## Step 8b – Add more scales (optional)
+
+Setup → **Scales** → *Add a scale* → name it → Edit: choose its own port (`COM4`, `/dev/ttyUSB1` … or a gateway IP:port), baud/parity, protocol and minimum weight → tick **Enabled** → Save. Within ~2 s the supervisor starts a reader for it; watch the *Live data* panel on the same page. The software refuses two enabled scales on the same port/gateway. On Linux give each USB-RS485 adapter a stable name (`/dev/serial/by-id/...`), because `ttyUSB0/1` can swap after a reboot.
+The Weighing screen shows one live display per scale; click the one you are standing at (remembered per PC). A ticket started on one bridge can be finished on another.
+
+## Step 8c – Plate recognition (ANPR, optional)
+
+1. **Camera**: Setup → Scales → Edit → *Camera*: a JPEG snapshot URL (Hikvision `/ISAPI/Streaming/channels/101/picture`, Dahua `/cgi-bin/snapshot.cgi`, most cameras have one) plus user/password. Point the camera at the plate, ~5–8 m, shutter ≥1/500 s, IR/light at night. *Test camera + plate read* checks it.
+2. **Recognition service** – pick one in Setup → *Plate recognition*:
+   * **CodeProject.AI Server** (free, self-hosted): install it, install its *ALPR* module, URL `http://127.0.0.1:32168/v1/vision/alpr`.
+   * **Plate Recognizer** (cloud API token, or their on-prem Snapshot SDK container): set the token, optional region hint (`in`, `us`, `gb`…).
+   * **Local command**: any program that prints JSON or `PLATE [confidence]`, e.g. OpenALPR: `alpr -c in -n 1 -j {image}`. It is run without a shell.
+   Upload a sample photo on the same page to try it before saving.
+3. **Policy**: *Ignore*, *Flag ticket (MISMATCH) + audit*, or *Block* (an admin ticks *Override* to continue). Minimum confidence default 0.6; below it the plate counts as UNREAD, never as a wrong plate.
+4. **Use**: press **Read** next to the vehicle box, or enable *auto-read* (reads once when a truck settles on the selected scale and the box is empty). The plate is matched to your vehicle master (stored tare, open ticket warning). On the 2nd weighing the system checks the truck on the bridge is the one on the ticket; the result is stored as OK / MISMATCH / UNREAD / NOIMG on the ticket, in reports and in Oracle.
+Plate comparison ignores spaces/dashes and OCR look-alikes (0/O, 1/I, 5/S, 8/B, 2/Z) and tolerates one wrong character on plates of 6+ characters.
 
 ## Step 9 – Daily use
 
@@ -153,9 +173,9 @@ journalctl -u weighbridge-scale -f                      # see errors
 
 ## Production readiness
 
-**Verified here (automated, `php tests/run.php` - 44 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; plus an HTTP smoke test of every page and API, a read from a real tty device (pseudo-terminal), and backup + integrity check.
+**Verified here (automated, `php tests/run.php` - 101 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; multi-scale isolation and a supervisor that starts/stops real reader processes, the v1→v3 data upgrade, the ANPR clients against mock Plate Recognizer / CodeProject.AI / OpenALPR-style services, ticket rules with plate OK/MISMATCH/UNREAD/NOIMG under warn and block policies, plus an HTTP smoke test of every page and API, a read from a real tty device (pseudo-terminal), and backup + integrity check.
 
-**Not verified by the author - do these on site before go-live:** real indicator/RS-485 wiring and Modbus map, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
+**Not verified by the author - do these on site before go-live:** real indicator/RS-485 wiring and Modbus map, **plate-reading accuracy on your camera and trucks (only the client code is tested, against mock services - try your own pictures in Setup > Plate recognition; do not use *Block* until you have),** several real ports at once, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
 
 Added for production: login lockout, CSP/security headers, allow-listed port/host values, `BEGIN IMMEDIATE` ticket numbering, cancellation propagated to Oracle, optional camera snapshot per weighment, read-only ERP REST API (`Setup > General`), health endpoint `api/health.php` (HTTP 503 when the scale daemon is down - point your uptime monitor at it), daily backup script:
 
@@ -182,6 +202,10 @@ See `docs/COMPARISON.md` for how this compares with public GitHub projects.
 | `ORA-00942` | Run `sql/oracle_schema.sql`; grant rights to the sync user |
 | Tickets stuck `PENDING` | Sync service not running, or Oracle unreachable – see Setup → Diagnostics |
 | Windows: port busy | Another program (indicator utility) holds the COM port |
+| Scale shows *Reader not running* | Supervisor service not running (`journalctl -u weighbridge-scale`), or scale not Enabled |
+| Second scale: *already uses /dev/ttyUSB0* | Each scale needs its own port; use by-id names |
+| Plate always UNREAD / NOIMG | Camera URL wrong (use *Test camera*), service down, or picture too dark/angled; check `curl` extension is enabled |
+| Many MISMATCH flags | Camera angle/lighting; lower *policy* to Flag, raise minimum confidence, or test other provider |
 
 ## Security notes
 

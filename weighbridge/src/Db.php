@@ -72,10 +72,18 @@ SQL);
     {
         self::migrate();
         self::pdo()->exec('CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY, username TEXT, ip TEXT, at INTEGER)');
+        self::pdo()->exec(<<<'SQL'
+CREATE TABLE IF NOT EXISTS scales (id INTEGER PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, cfg TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS live_scale (
+  scale_id INTEGER PRIMARY KEY, weight REAL, unit TEXT, stable INTEGER DEFAULT 0, raw TEXT,
+  status TEXT, message TEXT, updated_at REAL, heartbeat REAL);
+SQL);
         $cols = array_column(self::all('PRAGMA table_info(weighments)'), 'name');
-        foreach (['first_img', 'second_img'] as $c) {
-            if (!in_array($c, $cols, true)) { self::pdo()->exec("ALTER TABLE weighments ADD COLUMN $c TEXT"); }
+        foreach (['first_img' => 'TEXT', 'second_img' => 'TEXT', 'scale_id' => 'INTEGER', 'second_scale_id' => 'INTEGER',
+                  'plate_in' => 'TEXT', 'plate_in_conf' => 'REAL', 'plate_out' => 'TEXT', 'plate_out_conf' => 'REAL', 'plate_flag' => 'TEXT'] as $c => $t) {
+            if (!in_array($c, $cols, true)) { self::pdo()->exec("ALTER TABLE weighments ADD COLUMN $c $t"); }
         }
+        Scales::ensureDefault();   // v1 -> v3: the single scale becomes "Scale 1" keeping its settings
     }
 
     public static function audit(string $action, string $detail = ''): void

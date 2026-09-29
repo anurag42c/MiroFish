@@ -19,8 +19,8 @@ $rows = Db::all('SELECT * FROM weighments WHERE ' . implode(' AND ', $where) . '
 if (isset($_GET['csv'])) {
     header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="weighments_' . $from . '_' . $to . '.csv"');
     $o = fopen('php://output', 'w');
-    fputcsv($o, ['Ticket', 'Date', 'Vehicle', 'Party', 'Material', 'Direction', 'Gross kg', 'Tare kg', 'Net kg', 'Status', 'Oracle']);
-    foreach ($rows as $w) { fputcsv($o, [$w['ticket_no'], $w['created_at'], $w['vehicle_no'], $w['party'], $w['material'], $w['direction'], $w['gross_kg'], $w['tare_kg'], $w['net_kg'], $w['status'], $w['sync_status']]); }
+    fputcsv($o, ['Ticket', 'Date', 'Vehicle', 'Party', 'Material', 'Direction', 'Gross kg', 'Tare kg', 'Net kg', 'Status', 'Scale', 'Plate in', 'Plate out', 'Plate check', 'Oracle']);
+    foreach ($rows as $w) { fputcsv($o, [$w['ticket_no'], $w['created_at'], $w['vehicle_no'], $w['party'], $w['material'], $w['direction'], $w['gross_kg'], $w['tare_kg'], $w['net_kg'], $w['status'], Scales::find((int)$w['scale_id'])['name'] ?? '', $w['plate_in'], $w['plate_out'], $w['plate_flag'], $w['sync_status']]); }
     exit;
 }
 $tot = array_sum(array_map(fn($w) => $w['status'] === 'CLOSED' ? (float)$w['net_kg'] : 0, $rows));
@@ -35,10 +35,10 @@ page_head('Reports');
 <?php if (Auth::isAdmin()): ?><div class="card"><form method="post" style="display:flex;gap:10px;align-items:center"><?= csrf_field() ?>
   <span><b><?= (int)$pending ?></b> ticket(s) waiting for Oracle</span><button name="sync" value="1" class="ok">Send to Oracle now</button><button name="retry" value="1" class="sec">Re-queue failed</button></form></div><?php endif; ?>
 <div class="card"><p><b><?= count($rows) ?></b> tickets &middot; Net total <b><?= number_format($tot) ?> kg</b> (<?= number_format($tot / 1000, 3) ?> t)</p>
-<table><tr><th>Ticket</th><th>Date</th><th>Vehicle</th><th>Party</th><th>Material</th><th class="n">Gross</th><th class="n">Tare</th><th class="n">Net</th><th>Status</th><th>Oracle</th></tr>
+<table><tr><th>Ticket</th><th>Date</th><th>Vehicle</th><th>Party</th><th>Material</th><th>Scale</th><th class="n">Gross</th><th class="n">Tare</th><th class="n">Net</th><th>Status</th><th>Plate</th><th>Oracle</th></tr>
 <?php foreach ($rows as $w): ?>
-  <tr><td><a href="ticket.php?id=<?= (int)$w['id'] ?>"><?= e($w['ticket_no']) ?></a></td><td><?= e(substr($w['created_at'], 0, 16)) ?></td><td><?= e($w['vehicle_no']) ?></td><td><?= e($w['party']) ?></td><td><?= e($w['material']) ?></td>
+  <tr><td><a href="ticket.php?id=<?= (int)$w['id'] ?>"><?= e($w['ticket_no']) ?></a></td><td><?= e(substr($w['created_at'], 0, 16)) ?></td><td><?= e($w['vehicle_no']) ?></td><td><?= e($w['party']) ?></td><td><?= e($w['material']) ?></td><td><?= e((string)(Scales::find((int)$w['scale_id'])['name'] ?? '')) ?></td>
   <td class="n"><?= $w['gross_kg'] !== null ? number_format((float)$w['gross_kg']) : '' ?></td><td class="n"><?= $w['tare_kg'] !== null ? number_format((float)$w['tare_kg']) : '' ?></td><td class="n"><b><?= $w['net_kg'] !== null ? number_format((float)$w['net_kg']) : '' ?></b></td>
-  <td><?= e($w['status']) ?></td><td><span class="badge <?= ['SYNCED' => 'ok', 'FAILED' => 'bad', 'PENDING' => 'warn'][$w['sync_status']] ?? '' ?>" title="<?= e($w['sync_error']) ?>"><?= e($w['sync_status']) ?></span></td></tr>
+  <td><?= e($w['status']) ?></td><td><?php if ($w['plate_flag']): ?><span class="badge <?= ['OK' => 'ok', 'MISMATCH' => 'bad', 'UNREAD' => 'warn'][$w['plate_flag']] ?? '' ?>" title="<?= e(trim(($w['plate_in'] ?? '') . ' / ' . ($w['plate_out'] ?? ''), ' /')) ?>"><?= e($w['plate_flag']) ?></span><?php endif; ?></td><td><span class="badge <?= ['SYNCED' => 'ok', 'FAILED' => 'bad', 'PENDING' => 'warn'][$w['sync_status']] ?? '' ?>" title="<?= e($w['sync_error']) ?>"><?= e($w['sync_status']) ?></span></td></tr>
 <?php endforeach; ?></table></div>
 <?php page_foot();

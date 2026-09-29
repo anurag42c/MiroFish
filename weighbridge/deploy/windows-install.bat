@@ -2,7 +2,7 @@
 REM Run as Administrator. Edit PHPEXE and APPDIR first. Requires NSSM (https://nssm.cc) in PATH.
 set PHPEXE=C:\php\php.exe
 set APPDIR=C:\weighbridge
-nssm install WeighbridgeScale "%PHPEXE%" "%APPDIR%\bin\scale_daemon.php"
+nssm install WeighbridgeScale "%PHPEXE%" "%APPDIR%\bin\scale_supervisor.php"
 nssm set WeighbridgeScale AppDirectory "%APPDIR%"
 nssm set WeighbridgeScale Start SERVICE_AUTO_START
 nssm set WeighbridgeScale AppStdout "%APPDIR%\data\scale.log"

@@ -28,11 +28,16 @@ final class Settings
         'min_capture_kg' => '20',
         'allow_manual' => '0',
         'cam_url' => '', 'cam_user' => '', 'cam_pass' => '', 'api_token_hash' => '',
+        // ANPR (plate recognition) - global; camera URL is per scale
+        'anpr_provider' => 'off',       // off | platerecognizer | codeproject | command
+        'anpr_url' => '', 'anpr_key' => '', 'anpr_region' => '', 'anpr_command' => '',
+        'anpr_min_conf' => '0.6', 'anpr_policy' => 'warn',   // off | warn | block
+        'anpr_auto' => '0',
         // oracle
         'ora_enabled' => '0', 'ora_host' => '', 'ora_port' => '1521', 'ora_service' => '',
         'ora_user' => '', 'ora_pass' => '', 'ora_table' => 'WEIGHBRIDGE_TICKETS', 'ora_batch' => '50',
     ];
-    public const SECRETS = ['ora_pass', 'cam_pass'];
+    public const SECRETS = ['ora_pass', 'cam_pass', 'anpr_key'];
 
     private static ?array $cache = null;
 
@@ -42,7 +47,7 @@ final class Settings
             self::$cache = self::DEFAULTS;
             try {
                 foreach (Db::all('SELECT k, v FROM settings') as $r) {
-                    self::$cache[$r['k']] = in_array($r['k'], self::SECRETS, true) ? self::decrypt((string)$r['v']) : $r['v'];
+                    self::$cache[$r['k']] = in_array($r['k'], self::SECRETS, true) ? self::open((string)$r['v']) : $r['v'];
                 }
             } catch (Throwable) {}
         }
@@ -53,7 +58,7 @@ final class Settings
 
     public static function set(string $k, string $v): void
     {
-        $store = in_array($k, self::SECRETS, true) ? self::encrypt($v) : $v;
+        $store = in_array($k, self::SECRETS, true) ? self::seal($v) : $v;
         Db::q('INSERT INTO settings(k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', [$k, $store]);
         self::$cache = null;
     }
@@ -67,14 +72,14 @@ final class Settings
         return (string)file_get_contents($f);
     }
 
-    private static function encrypt(string $plain): string
+    public static function seal(string $plain): string
     {
         if ($plain === '') { return ''; }
         $n = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
         return 'enc:' . base64_encode($n . sodium_crypto_secretbox($plain, $n, self::key()));
     }
 
-    private static function decrypt(string $s): string
+    public static function open(string $s): string
     {
         if (!str_starts_with($s, 'enc:')) { return $s; }
         $raw = base64_decode(substr($s, 4), true);

@@ -1,5 +1,5 @@
 [Unit]
-Description=Weighbridge scale reader (serial -> SQLite)
+Description=Weighbridge scale readers (one per enabled scale, serial/TCP -> SQLite)
 After=network.target
 
 [Service]
@@ -9,7 +9,7 @@ ReadWritePaths=/var/www/weighbridge/data
 User=www-data
 Group=dialout
 WorkingDirectory=/var/www/weighbridge
-ExecStart=/usr/bin/php /var/www/weighbridge/bin/scale_daemon.php
+ExecStart=/usr/bin/php /var/www/weighbridge/bin/scale_supervisor.php
 Restart=always
 RestartSec=3
 

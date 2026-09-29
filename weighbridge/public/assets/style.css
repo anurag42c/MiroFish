@@ -25,3 +25,10 @@ th{background:#f0f3f8;font-size:12px;text-transform:uppercase;color:var(--mut)}t
 .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}.tabs a{padding:7px 14px;background:#e8edf5;border-radius:6px;text-decoration:none;color:var(--ink)}.tabs a.on{background:var(--pri);color:#fff}
 .hide{display:none}.center{max-width:380px;margin:60px auto}
 @media print{header,.noprint{display:none}body{background:#fff}.card{border:0}}
+.scales{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:16px}
+.scale-card{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:10px;cursor:pointer}
+.scale-card.sel{border-color:var(--pri);box-shadow:0 0 0 3px #0b5ed733}
+.scale-card .nm{font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between}
+.scale-card .display{font-size:38px;padding:10px 14px}.scale-card .display small{font-size:16px}
+.okt{color:var(--ok)}.badt{color:var(--bad)}.warnt{color:var(--warn);font-weight:700}
+.badge.plate{background:#5b3fd4}
