@@ -19,8 +19,8 @@ $rows = Db::all('SELECT * FROM weighments WHERE ' . implode(' AND ', $where) . '
 if (isset($_GET['csv'])) {
     header('Content-Type: text/csv'); header('Content-Disposition: attachment; filename="weighments_' . $from . '_' . $to . '.csv"');
     $o = fopen('php://output', 'w');
-    fputcsv($o, ['Ticket', 'Date', 'Vehicle', 'Party', 'Material', 'Direction', 'Gross kg', 'Tare kg', 'Net kg', 'Status', 'Scale', 'Plate in', 'Plate out', 'Plate check', 'Oracle']);
-    foreach ($rows as $w) { fputcsv($o, [$w['ticket_no'], $w['created_at'], $w['vehicle_no'], $w['party'], $w['material'], $w['direction'], $w['gross_kg'], $w['tare_kg'], $w['net_kg'], $w['status'], Scales::find((int)$w['scale_id'])['name'] ?? '', $w['plate_in'], $w['plate_out'], $w['plate_flag'], $w['sync_status']]); }
+    fputcsv($o, ['Ticket', 'Date', 'Vehicle', 'Party', 'Material', 'Direction', 'Gross kg', 'Tare kg', 'Net kg', 'Status', 'Scale', 'Plate in', 'Plate out', 'Plate check', 'Oracle'], ',', '"', '');
+    foreach ($rows as $w) { fputcsv($o, [$w['ticket_no'], $w['created_at'], $w['vehicle_no'], $w['party'], $w['material'], $w['direction'], $w['gross_kg'], $w['tare_kg'], $w['net_kg'], $w['status'], Scales::find((int)$w['scale_id'])['name'] ?? '', $w['plate_in'], $w['plate_out'], $w['plate_flag'], $w['sync_status']], ',', '"', ''); }
     exit;
 }
 $tot = array_sum(array_map(fn($w) => $w['status'] === 'CLOSED' ? (float)$w['net_kg'] : 0, $rows));
