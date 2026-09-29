@@ -35,3 +35,16 @@ th{background:#f0f3f8;font-size:12px;text-transform:uppercase;color:var(--mut)}t
 .gate-card{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:12px}
 .gate-card .nm{font-weight:700;margin-bottom:4px;display:flex;justify-content:space-between;gap:8px}
 .gbtns{display:flex;gap:8px;margin:10px 0 4px}.gbtns button{flex:1;padding:14px 8px;font-size:16px}
+.exitform{display:flex;flex-direction:column;gap:6px;min-width:190px}.exitform select{width:100%}
+.row>*{min-width:0}img{max-width:100%;height:auto}
+@media(max-width:640px){
+ .row{flex-direction:column;gap:0}
+ header{gap:8px;padding:8px 12px}nav{flex-wrap:wrap;flex-basis:100%}nav a{padding:6px 10px}
+ main{padding:0 10px}.card{padding:12px}
+ .display{font-size:44px;padding:12px 14px}.scale-card .display{font-size:34px}
+ table{display:block;overflow-x:auto}
+ .exitform{min-width:0}.gbtns button{padding:16px 6px}
+}
+.grid>*,main>*{min-width:0}
+@media(max-width:800px){.g2,.g3{grid-template-columns:minmax(0,1fr)}}
+.hint,.card p,code,pre.log{overflow-wrap:anywhere}

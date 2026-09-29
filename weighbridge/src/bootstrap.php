@@ -5,6 +5,7 @@ define('WB_ROOT', dirname(__DIR__));
 define('WB_DATA', rtrim(getenv('WB_DATA') ?: WB_ROOT . '/data', '/\\'));
 define('WB_DB', WB_DATA . '/weighbridge.sqlite');
 
+define('WB_VERSION', is_file(WB_ROOT . '/VERSION') ? trim((string)file_get_contents(WB_ROOT . '/VERSION')) : 'dev');
 date_default_timezone_set(getenv('WB_TZ') ?: 'Asia/Kolkata');
 
 foreach (['Db', 'Settings', 'Auth', 'SerialPort', 'ScaleParser', 'Modbus', 'ScaleReader', 'Scales', 'Gates', 'GateEntries', 'OracleSync', 'Camera', 'Anpr', 'Weighment'] as $c) {

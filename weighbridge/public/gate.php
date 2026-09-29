@@ -75,10 +75,10 @@ page_head('Gate');
           <td><?= e($e['vehicle_no']) ?><?php if ($e['plate_flag'] === 'MISMATCH'): ?> <span class="badge bad">PLATE</span><?php endif; ?></td>
           <td><?= e(substr($e['in_at'], 11, 5)) ?></td>
           <td><?= $e['tstatus'] === 'CLOSED' ? '<span class="badge ok">done</span>' : ($e['tstatus'] === 'OPEN' ? '<span class="badge warn">1st done</span>' : '<span class="badge">not yet</span>') ?></td>
-          <td><form method="post" style="display:flex;gap:4px;flex-wrap:wrap"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$e['id'] ?>"><input type="hidden" name="open_gate" value="1">
+          <td><form method="post" class="exitform"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$e['id'] ?>"><input type="hidden" name="open_gate" value="1">
             <select name="gate_id"><?php foreach ($exitGates as $g) echo '<option value="' . (int)$g['id'] . '">' . e($g['name']) . '</option>'; ?><option value="0">(no gate)</option></select>
-            <?= $override ?><button name="do" value="exit">Exit &amp; open</button>
-            <?php if (Auth::isAdmin()): ?><button name="do" value="cancel" class="sec" onclick="var r=prompt('Cancel reason?');if(!r)return false;var i=document.createElement('input');i.type='hidden';i.name='reason';i.value=r;this.form.appendChild(i)">Cancel</button><?php endif; ?></form></td></tr>
+            <?= $override ?><div style="display:flex;gap:6px"><button name="do" value="exit">Exit &amp; open</button>
+            <?php if (Auth::isAdmin()): ?><button name="do" value="cancel" class="sec" onclick="var r=prompt('Cancel reason?');if(!r)return false;var i=document.createElement('input');i.type='hidden';i.name='reason';i.value=r;this.form.appendChild(i)">Cancel</button><?php endif; ?></div></form></td></tr>
       <?php endforeach; ?></table><?php endif; ?>
     </div>
     <div class="card"><h2>Recent exits</h2><table><tr><th>Entry</th><th>Vehicle</th><th>In</th><th>Out</th><th>Plate</th></tr>

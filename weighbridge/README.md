@@ -2,6 +2,9 @@
 
 A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer).
 
+> **Client documentation:** [`docs/PRODUCT_MANUAL.pdf`](docs/PRODUCT_MANUAL.pdf) (also `docs/PRODUCT_MANUAL.md`) - installation, setup, daily operation for operators and security, administration, troubleshooting, commissioning checklist.
+> **Quick start:** `php bin/check.php` (pre-flight check), then `start.sh` (Linux/macOS) or `start.bat` (Windows), then open `http://localhost:8080/`.
+
 ```
  Indicator ──RS-232 / RS-485 / TCP──►  bin/scale_daemon.php ──►  SQLite  ◄── Web UI (public/)
                                                                    │
@@ -29,6 +32,10 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | `sql/oracle_schema.sql` | Oracle table DDL |
 | `bin/backup.php` | Online SQLite backup with integrity check |
 | `tests/run.php` | Automated tests |
+| `bin/check.php` | Pre-flight check of the PC (PHP, extensions, folders, serial ports, Oracle driver, scale readers) |
+| `start.sh`, `start.bat` | One-click quick start (checks, readers + web server) |
+| `docs/PRODUCT_MANUAL.pdf` / `.md` | Product manual for the client, with screenshots (`docs/screenshots/`) |
+| `VERSION`, `CHANGELOG.md` | Version information |
 | `docs/COMPARISON.md` | Comparison with public GitHub weighbridge projects |
 | `deploy/` | systemd units, Windows NSSM installer |
 | `data/` | SQLite DB + encryption key (created on install; **back this up**) |
@@ -69,7 +76,7 @@ Linux: copy this `weighbridge/` folder to `/var/www/weighbridge`. Windows: `C:\w
 sudo chown -R www-data:www-data /var/www/weighbridge/data
 sudo chmod 750 /var/www/weighbridge/data
 ```
-Only `public/` must be reachable from the web. `data/` (database + key) must **not** be in the web root – it isn't, if you point the web server at `public/`.
+Run `php bin/check.php` to verify the PC. Only `public/` must be reachable from the web. `data/` (database + key) must **not** be in the web root – it isn't, if you point the web server at `public/`.
 
 ## Step 4 – Give access to the serial port (Linux)
 

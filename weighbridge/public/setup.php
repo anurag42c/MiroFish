@@ -297,6 +297,7 @@ if ($tab === 'scales'): ?>
 
 <?php elseif ($tab === 'diag'): ?>
 <div class="card"><h2>System</h2><table>
+<tr><td>Weighbridge</td><td>v<?= e(WB_VERSION) ?></td></tr>
 <tr><td>PHP</td><td><?= PHP_VERSION ?> (<?= PHP_OS_FAMILY ?>)</td></tr>
 <tr><td>Extensions</td><td>pdo_sqlite <?= extension_loaded('pdo_sqlite') ? '&#10003;' : '&#10007;' ?> &middot; sodium <?= extension_loaded('sodium') ? '&#10003;' : '&#10007;' ?> &middot; curl <?= function_exists('curl_init') ? '&#10003;' : '&#10007; (needed for camera/ANPR)' ?> &middot; oci8 <?= function_exists('oci_connect') ? '&#10003;' : '&#10007;' ?> &middot; pdo_oci <?= extension_loaded('pdo_oci') ? '&#10003;' : '&#10007;' ?></td></tr>
 <?php foreach (Scales::all() as $sc): $l = Weighment::live((int)$sc['id']); ?>
