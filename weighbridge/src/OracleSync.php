@@ -96,6 +96,72 @@ final class OracleSync
         ]);
     }
 
+    // ------------------------------------------------------------------ invoice / return documents
+    private static function ident(string $t): string
+    {
+        $t = strtoupper($t);
+        if (!preg_match('/^[A-Z][A-Z0-9_$#]{0,29}(\.[A-Z][A-Z0-9_$#]{0,29})?$/', $t)) { throw new RuntimeException('Invalid Oracle table name: ' . $t); }
+        return $t;
+    }
+
+    /** Bind values for the document header MERGE (also used by the tests). */
+    public static function documentParams(array $p): array
+    {
+        $n = fn($x) => ($x === '' || $x === null) ? null : (is_float($x) || is_int($x) ? (string)$x : $x);
+        $exc = array_filter($p['exceptions'] ?? [], fn($e) => ($e['status'] ?? '') === 'OPEN');
+        $high = count(array_filter($exc, fn($e) => $e['severity'] === 'HIGH')); $warn = count(array_filter($exc, fn($e) => $e['severity'] === 'WARN'));
+        return [
+            'doc_no' => $p['documentNo'], 'doc_type' => $p['documentType'], 'invoice_no' => $n($p['invoiceNo']), 'invoice_date' => $n($p['invoiceDate']),
+            'supplier' => $n($p['supplier']), 'supplier_tax_id' => $n($p['supplierTaxId']), 'buyer' => $n($p['buyer']), 'po_no' => $n($p['poNo']),
+            'ref_no' => $n($p['referenceNo']), 'orig_invoice_no' => $n($p['originalInvoiceNo']), 'vehicle_no' => $n($p['vehicleNo']), 'eway_no' => $n($p['ewayBillNo']),
+            'currency' => $n($p['currency']), 'subtotal' => $n($p['subtotal']), 'tax_amount' => $n($p['taxAmount']), 'total_amount' => $n($p['totalAmount']),
+            'match_status' => $p['matchStatus'], 'wb_tickets' => mb_substr(implode(',', $p['weighbridge']['ticketNos'] ?? []), 0, 500) ?: null,
+            'wb_net_kg' => $n($p['weighbridge']['netKg'] ?? null), 'exc_high' => (string)$high, 'exc_warn' => (string)$warn,
+            'exc_summary' => mb_substr(implode('; ', array_map(fn($e) => $e['code'], $exc)), 0, 1000) ?: null,
+            'verified_by' => $n($p['verifiedBy']), 'verified_at' => $n($p['verifiedAt']),
+        ];
+    }
+
+    /** MERGE the document and its lines (idempotent; lines that no longer exist are removed). */
+    public function pushDocument(array $p): void
+    {
+        $t = self::ident((string)$this->cfg['ora_doc_table']); $lt = self::ident((string)$this->cfg['ora_doc_line_table']);
+        $cols = ['DOC_TYPE' => 'doc_type', 'INVOICE_NO' => 'invoice_no', 'SUPPLIER' => 'supplier', 'SUPPLIER_TAX_ID' => 'supplier_tax_id', 'BUYER' => 'buyer', 'PO_NO' => 'po_no',
+                 'REF_NO' => 'ref_no', 'ORIG_INVOICE_NO' => 'orig_invoice_no', 'VEHICLE_NO' => 'vehicle_no', 'EWAY_NO' => 'eway_no', 'CURRENCY' => 'currency',
+                 'SUBTOTAL' => 'subtotal', 'TAX_AMOUNT' => 'tax_amount', 'TOTAL_AMOUNT' => 'total_amount', 'MATCH_STATUS' => 'match_status', 'WB_TICKETS' => 'wb_tickets',
+                 'WB_NET_KG' => 'wb_net_kg', 'EXC_HIGH' => 'exc_high', 'EXC_WARN' => 'exc_warn', 'EXC_SUMMARY' => 'exc_summary', 'VERIFIED_BY' => 'verified_by'];
+        $set = []; $ic = []; $iv = [];
+        foreach ($cols as $c => $b) { $set[] = "$c = :$b"; $ic[] = $c; $iv[] = ":$b"; }
+        $date = "TO_DATE(:invoice_date, 'YYYY-MM-DD')"; $ts = "TO_TIMESTAMP(:verified_at, 'YYYY-MM-DD HH24:MI:SS')";
+        $sql = "MERGE INTO $t d USING (SELECT :doc_no AS doc_no FROM dual) s ON (d.DOC_NO = s.doc_no)
+                WHEN MATCHED THEN UPDATE SET " . implode(', ', $set) . ", INVOICE_DATE = $date, VERIFIED_AT = $ts, SYNCED_AT = SYSTIMESTAMP
+                WHEN NOT MATCHED THEN INSERT (DOC_NO, " . implode(', ', $ic) . ", INVOICE_DATE, VERIFIED_AT, SYNCED_AT)
+                VALUES (:doc_no, " . implode(', ', $iv) . ", $date, $ts, SYSTIMESTAMP)";
+        $this->run($sql, self::documentParams($p));
+
+        $this->run("DELETE FROM $lt WHERE DOC_NO = :doc_no AND LINE_NO > :n", ['doc_no' => $p['documentNo'], 'n' => (string)count($p['lines'])]);
+        $n = fn($x) => ($x === '' || $x === null) ? null : (string)$x;
+        foreach ($p['lines'] as $l) {
+            $this->run("MERGE INTO $lt d USING (SELECT :doc_no AS doc_no, :line_no AS line_no FROM dual) s ON (d.DOC_NO = s.doc_no AND d.LINE_NO = s.line_no)
+                WHEN MATCHED THEN UPDATE SET MATERIAL_CODE = :material_code, DESCRIPTION = :description, HSN = :hsn, QTY = :qty, UOM = :uom, RATE = :rate, AMOUNT = :amount, QTY_KG = :qty_kg
+                WHEN NOT MATCHED THEN INSERT (DOC_NO, LINE_NO, MATERIAL_CODE, DESCRIPTION, HSN, QTY, UOM, RATE, AMOUNT, QTY_KG)
+                VALUES (:doc_no, :line_no, :material_code, :description, :hsn, :qty, :uom, :rate, :amount, :qty_kg)", [
+                'doc_no' => $p['documentNo'], 'line_no' => (string)$l['lineNo'], 'material_code' => $n($l['materialCode']), 'description' => $n($l['description']),
+                'hsn' => $n($l['hsn']), 'qty' => $n($l['quantity']), 'uom' => $n($l['uom']), 'rate' => $n($l['rate']), 'amount' => $n($l['amount']), 'qty_kg' => $n($l['quantityKg'])]);
+        }
+    }
+
+    /** Are the two document tables there? (Setup test button) */
+    public function testDocTables(): string
+    {
+        $this->connect();
+        foreach ([$this->cfg['ora_doc_table'], $this->cfg['ora_doc_line_table']] as $tb) {
+            try { $this->run('SELECT COUNT(*) AS C FROM ' . self::ident((string)$tb) . ' WHERE 1 = 0'); }
+            catch (RuntimeException $e) { return "Connected, but table $tb is not usable: " . $e->getMessage() . ' - run the WB_DOCUMENTS part of sql/oracle_schema.sql'; }
+        }
+        return 'Connected OK. Document tables ' . $this->cfg['ora_doc_table'] . ' and ' . $this->cfg['ora_doc_line_table'] . ' are present.';
+    }
+
     /** @return array{ok:int, failed:int, error:?string} */
     public static function syncPending(?int $limit = null): array
     {

@@ -22,7 +22,7 @@ Settings::set('installed', '1');
 // mock camera + ANPR HTTP services
 $mockPort = random_int(20000, 40000);
 $relayLog = $tmp . '/relay.log';
-$mock = proc_open([PHP_BINARY, '-S', "127.0.0.1:$mockPort", __DIR__ . '/mock_server.php'], [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $mp, null, ['RELAY_LOG' => $relayLog] + getenv());
+$mock = proc_open([PHP_BINARY, '-S', "127.0.0.1:$mockPort", __DIR__ . '/mock_server.php'], [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $mp, null, ['RELAY_LOG' => $relayLog, 'CLAUDE_LOG' => $tmp . '/claude.log', 'SAP_LOG' => $tmp . '/sap.log'] + getenv());
 for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $mockPort); $i++) { usleep(100000); }
 register_shutdown_function(function () use ($mock) { if (is_resource($mock)) { proc_terminate($mock); } });
 $d = Settings::DEFAULTS;
@@ -457,6 +457,8 @@ setLive(30000, true, 'RUNNING', 1);
 $tid = Weighment::create(['vehicle_no' => 'BOOMFAIL1', 'first_type' => 'GROSS', 'scale_id' => 1], null);
 setLive(9000, true, 'RUNNING', 1); Weighment::second($tid, null, 1);
 t('a dead barrier never blocks or undoes the weighing', Db::val('SELECT status FROM weighments WHERE id=?', [$tid]) === 'CLOSED' && (int)Db::val("SELECT COUNT(*) FROM gate_events WHERE gate_id=? AND ok=0", [$gB1]) === 1);
+
+require __DIR__ . '/docs_tests.php';
 
 echo "Oracle (no driver expected in CI)\n";
 $r = OracleSync::syncPending(10);

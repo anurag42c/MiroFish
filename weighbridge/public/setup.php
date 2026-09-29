@@ -4,18 +4,21 @@ Auth::require(true);
 
 $tab = $_GET['tab'] ?? 'scales';
 $sid = (int)($_GET['id'] ?? 0);
-$tabs = ['scales' => 'Scales', 'gates' => 'Gates', 'anpr' => 'Plate recognition', 'oracle' => 'Oracle transfer', 'general' => 'General', 'users' => 'Users', 'diag' => 'Diagnostics'];
+$tabs = ['scales' => 'Scales', 'gates' => 'Gates', 'anpr' => 'Plate recognition', 'docs' => 'Documents & OCR', 'oracle' => 'Oracle transfer', 'general' => 'General', 'users' => 'Users', 'diag' => 'Diagnostics'];
 if ($tab === 'scale') { if (!Scales::find($sid)) { $tab = 'scales'; } }
 elseif ($tab === 'gate') { if (!Gates::find($sid)) { $tab = 'gates'; } }
 elseif (!isset($tabs[$tab])) { $tab = 'scales'; }
 
 $fields = [
+    'docs' => ['ocr_provider', 'ocr_claude_key', 'ocr_claude_model', 'ocr_claude_url', 'ocr_effort', 'ocr_tesseract_cmd', 'doc_max_mb', 'doc_date_order', 'doc_match_days', 'doc_qty_tol_pct',
+               'doc_scan_days', 'doc_scan_grace_h', 'doc_targets', 'doc_send_policy', 'ora_doc_table', 'ora_doc_line_table',
+               'sap_url', 'sap_auth', 'sap_user', 'sap_pass', 'sap_token', 'sap_client', 'sap_ref_path', 'sap_po_url', 'sap_timeout'],
     'gates' => ['gate_require_entry', 'gate_exit_policy'],
     'anpr' => ['anpr_provider', 'anpr_url', 'anpr_key', 'anpr_region', 'anpr_command', 'anpr_min_conf', 'anpr_policy'],
     'oracle' => ['ora_host', 'ora_port', 'ora_service', 'ora_user', 'ora_pass', 'ora_table', 'ora_batch'],
     'general' => ['company_name', 'company_address', 'ticket_prefix'],
 ];
-$checks = ['anpr' => ['anpr_auto'], 'oracle' => ['ora_enabled'], 'general' => ['allow_manual']];
+$checks = ['docs' => ['sap_csrf'], 'anpr' => ['anpr_auto'], 'oracle' => ['ora_enabled'], 'general' => ['allow_manual']];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Auth::checkCsrf();
@@ -63,6 +66,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $x = Scales::find((int)$_POST['id']); Scales::save((int)$x['id'], $x['name'], !$x['enabled'], []); flash('Updated.');
         } elseif (isset($fields[$tab]) && $do === '') {
             if (isset($_POST['ora_table']) && !preg_match('/^[A-Za-z][A-Za-z0-9_$#]{0,29}(\.[A-Za-z][A-Za-z0-9_$#]{0,29})?$/', trim($_POST['ora_table']))) { throw new RuntimeException('Invalid Oracle table name'); }
+            foreach (['ocr_claude_url', 'sap_url', 'sap_po_url'] as $uk) { if (($_POST[$uk] ?? '') !== '' && !preg_match('#^https?://#i', trim($_POST[$uk]))) { throw new RuntimeException("$uk must start with http:// or https://"); } }
+            foreach (['ora_doc_table', 'ora_doc_line_table'] as $tk) { if (isset($_POST[$tk]) && !preg_match('/^[A-Za-z][A-Za-z0-9_$#]{0,29}(\.[A-Za-z][A-Za-z0-9_$#]{0,29})?$/', trim($_POST[$tk]))) { throw new RuntimeException("$tk is not a valid Oracle table name"); } }
+            if (($_POST['ocr_tesseract_cmd'] ?? '') !== '' && str_contains($_POST['ocr_tesseract_cmd'], "\n")) { throw new RuntimeException('The OCR command must be a single line.'); }
             if (($_POST['anpr_url'] ?? '') !== '' && !preg_match('#^https?://#i', trim($_POST['anpr_url']))) { throw new RuntimeException('ANPR URL must start with http:// or https://'); }
             foreach ($fields[$tab] as $k) {
                 if (!isset($_POST[$k])) { continue; }
@@ -236,6 +242,56 @@ if ($tab === 'scales'): ?>
 <pre class="log" id="out" style="display:none"></pre>
 </form>
 
+<?php elseif ($tab === 'docs'): ?>
+<form id="f" method="post" enctype="multipart/form-data"><?= csrf_field() ?>
+<div class="grid g2">
+<div class="card"><h2>1. Reading the picture (OCR)</h2>
+  <label>OCR provider</label><select name="ocr_provider" id="ocr_provider"><?= $sel('ocr_provider', ['off' => 'Off - type the details in', 'claude' => 'Claude (Anthropic API) - best quality, reads photos and PDFs', 'tesseract' => 'Tesseract - offline, for clean scans']) ?></select>
+  <div class="o_claude">
+    <div class="flash warnbox">Documents are <b>sent to the Anthropic API</b> for reading (internet needed, usage is billed by Anthropic). If invoices must stay on your premises use Tesseract.</div>
+    <label>Anthropic API key <?= $s['ocr_claude_key'] !== '' ? '(saved - blank keeps)' : '' ?></label><input name="ocr_claude_key" type="password" autocomplete="new-password">
+    <div class="row"><div><label>Model</label><?= $in('ocr_claude_model') ?></div><div><label>Thinking effort</label><select name="ocr_effort"><?= $sel('ocr_effort', ['low' => 'low (fastest, cheapest)', 'medium' => 'medium (recommended)', 'high' => 'high (hardest documents)']) ?></select></div></div>
+    <label>API URL (leave as is unless you use a gateway)</label><?= $in('ocr_claude_url') ?>
+    <div class="hint">Default model <code>claude-opus-5-5</code>. A cheaper model (for example <code>claude-sonnet-5-5</code>) can be entered here if it reads your invoices well - test with your own documents below.</div>
+  </div>
+  <div class="o_tesseract"><label>OCR command</label><?= $in('ocr_tesseract_cmd') ?>
+    <div class="hint">Needs Tesseract installed (Windows: UB Mannheim build; Linux: <code>apt install tesseract-ocr</code>). <code>{image}</code> is replaced by the picture. PDF needs <code>pdftoppm</code> (poppler). Clean scans and screenshots read well; crumpled phone photos do not - use Claude for those.</div></div>
+  <div class="row"><div><label>Max upload (MB)</label><?= $in('doc_max_mb', 'number') ?></div><div><label>Dates on documents are</label><select name="doc_date_order"><?= $sel('doc_date_order', ['DMY' => 'day / month / year', 'MDY' => 'month / day / year']) ?></select></div></div>
+  <h2 style="margin-top:14px">Test the reader</h2>
+  <label>Sample invoice (JPEG, PNG or PDF) and tag</label>
+  <div class="row"><input type="file" name="sample" accept="image/jpeg,image/png,application/pdf"><select name="sample_type"><option value="PO_INVOICE">Purchase invoice</option><option value="MATERIAL_RETURN">Material return</option></select></div>
+  <p><button type="button" class="sec" data-test="ocr">Read the sample (uses the values above, even if unsaved)</button></p>
+</div>
+
+<div class="card"><h2>2. Matching with the weighbridge</h2>
+  <div class="row"><div><label>Date window (days either side)</label><?= $in('doc_match_days', 'number') ?></div><div><label>Quantity tolerance (%)</label><?= $in('doc_qty_tol_pct', 'number', 'step="0.1"') ?></div></div>
+  <div class="row"><div><label>"Weighed, no invoice": look back (days)</label><?= $in('doc_scan_days', 'number') ?></div><div><label>...after (hours)</label><?= $in('doc_scan_grace_h', 'number') ?></div></div>
+  <div class="hint">A document is matched by vehicle number, challan number = invoice number, supplier, material, weight and date. The invoice quantity is compared with the ticket net weight (kg / MT).</div>
+  <h2 style="margin-top:14px">3. Sending verified documents</h2>
+  <label>Send to</label><select name="doc_targets"><?= $sel('doc_targets', ['none' => 'Nowhere (keep here only)', 'oracle' => 'Oracle tables', 'sap' => 'SAP (HTTP)', 'both' => 'Oracle and SAP']) ?></select>
+  <label>Documents with open HIGH exceptions</label><select name="doc_send_policy"><?= $sel('doc_send_policy', ['no_high' => 'Hold until resolved or waived (recommended)', 'any' => 'Send anyway, exceptions included in the data']) ?></select>
+  <h2 style="margin-top:14px">Oracle</h2>
+  <div class="row"><div><label>Document table</label><?= $in('ora_doc_table') ?></div><div><label>Line table</label><?= $in('ora_doc_line_table') ?></div></div>
+  <div class="hint">Uses the connection in the Oracle tab. Create the tables from <code>sql/oracle_schema.sql</code> (WB_DOCUMENTS part).</div>
+  <p><button type="button" class="sec" data-test="oracle_docs">Test Oracle document tables</button></p>
+</div>
+
+<div class="card" style="grid-column:1/-1"><h2>SAP (HTTP)</h2>
+  <div class="row"><div style="flex:3"><label>Endpoint that receives each document (POST, JSON)</label><?= $in('sap_url') ?></div><div><label>SAP client (optional)</label><?= $in('sap_client') ?></div></div>
+  <div class="row"><div><label>Login</label><select name="sap_auth"><?= $sel('sap_auth', ['basic' => 'User + password (basic)', 'bearer' => 'Bearer token (OAuth / API management)', 'none' => 'None']) ?></select></div>
+    <div><label>User</label><?= $in('sap_user', 'text', 'autocomplete="off"') ?></div><div><label>Password <?= $s['sap_pass'] !== '' ? '(saved)' : '' ?></label><input name="sap_pass" type="password" autocomplete="new-password"></div>
+    <div><label>Token <?= $s['sap_token'] !== '' ? '(saved)' : '' ?></label><input name="sap_token" type="password" autocomplete="new-password"></div></div>
+  <div class="row"><div><label>Where is the SAP document number in the answer? (optional, e.g. <code>d.MaterialDocument</code>)</label><?= $in('sap_ref_path') ?></div>
+    <div><label>Purchase-order lookup URL (optional, use {po})</label><?= $in('sap_po_url') ?></div><div><label>Timeout (s)</label><?= $in('sap_timeout', 'number') ?></div></div>
+  <label style="text-transform:none;font-weight:400"><input type="checkbox" name="sap_csrf" value="1" <?= $s['sap_csrf'] === '1' ? 'checked' : '' ?>> SAP Gateway CSRF handshake (fetch a token with X-CSRF-Token: Fetch before posting)</label>
+  <div class="hint">The program POSTs the JSON described in the manual (Appendix G) to the endpoint; any 2xx answer counts as accepted. Connect it to a BAPI / RFC / OData service on the SAP side (or SAP Integration Suite). The PO lookup URL may return a simple JSON or the standard OData purchase-order shapes.</div>
+  <p><button type="button" class="sec" data-test="sap">Test SAP connection &amp; login</button> <input name="test_po" placeholder="PO number to look up" style="width:200px;display:inline-block"> <button type="button" class="sec" data-test="sap_po">Test PO lookup</button></p>
+</div>
+</div>
+<p><button>Save</button></p>
+<pre class="log" id="out" style="display:none"></pre>
+</form>
+
 <?php elseif ($tab === 'anpr'): ?>
 <form id="f" method="post" enctype="multipart/form-data"><?= csrf_field() ?>
 <div class="card" style="max-width:720px"><h2>Automatic number-plate recognition (ANPR)</h2>
@@ -322,6 +378,8 @@ function vis() {
   }
   const gd = $('#g_driver');
   if (gd) { $$('[class*="d_"]').forEach(e => { if ([...e.classList].some(c => c.startsWith('d_'))) e.style.display = e.classList.contains('d_' + gd.value) ? '' : 'none'; }); }
+  const op = $('#ocr_provider');
+  if (op) { $$('.o_claude').forEach(e => e.style.display = op.value === 'claude' ? '' : 'none'); $$('.o_tesseract').forEach(e => e.style.display = op.value === 'tesseract' ? '' : 'none'); }
   const a = $('#anpr_provider');
   if (a) {
     $$('.p_url').forEach(e => e.style.display = ['platerecognizer', 'codeproject'].includes(a.value) ? '' : 'none');

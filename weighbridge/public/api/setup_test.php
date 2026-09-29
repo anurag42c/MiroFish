@@ -32,6 +32,35 @@ try {
         Gates::log($gid, $c['gate_name'], 'test-' . $act, 'setup', true, 'OK (unsaved settings)');
         out(true, "Sent $act to '{$c['gate_name']}'. Watch the barrier. (State is not changed by a test.)");
     }
+    if (in_array($_POST['action'] ?? '', ['ocr', 'sap', 'sap_po', 'oracle_docs'], true)) {
+        $ov = [];
+        foreach ($_POST as $k => $v) { if (is_string($v) && array_key_exists($k, Settings::DEFAULTS) && !(in_array($k, Settings::SECRETS, true) && $v === '')) { $ov[$k] = $v; } }
+        $ov['sap_csrf'] = isset($_POST['sap_csrf']) ? '1' : '0';
+        Settings::override($ov);
+        switch ($_POST['action']) {
+            case 'ocr':
+                $f = $_FILES['sample'] ?? null;
+                if (!$f || $f['error'] !== UPLOAD_ERR_OK) { out(false, 'Choose a sample invoice first.'); }
+                $mime = (new finfo(FILEINFO_MIME_TYPE))->file($f['tmp_name']) ?: '';
+                if (!isset(Documents::ALLOWED_MIME[$mime]) || $f['size'] > 10 * 1048576) { out(false, 'Use a JPEG, PNG or PDF up to 10 MB.'); }
+                $t0 = microtime(true);
+                $r = Ocr::extract($f['tmp_name'], $mime, ($_POST['sample_type'] ?? '') === 'MATERIAL_RETURN' ? 'MATERIAL_RETURN' : 'PO_INVOICE');
+                if (!$r['ok']) { out(false, $r['error']); }
+                $d = $r['data'];
+                $show = array_intersect_key($d, array_flip(['invoice_no', 'invoice_date', 'supplier_name', 'buyer_name', 'po_no', 'orig_invoice_no', 'vehicle_no', 'currency', 'subtotal', 'tax_amount', 'total_amount']));
+                $txt = json_encode($show + ['lines' => $d['lines'], 'warnings' => $d['warnings']], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                out(true, sprintf('Read in %.1f s by %s, %d line item(s)%s.', microtime(true) - $t0, $r['provider'], count($d['lines']), isset($d['confidence']) ? ', confidence ' . round($d['confidence'] * 100) . '%' : ''), ['data' => $txt]);
+            case 'sap':
+                $r = Sap::test(); out($r['ok'], $r['message']);
+            case 'sap_po':
+                $po = trim((string)($_POST['test_po'] ?? ''));
+                if ($po === '') { out(false, 'Type a PO number to look up.'); }
+                $p = Sap::fetchPo($po);
+                out($p !== null && (bool)$p['lines'], $p ? ('PO ' . $p['po_no'] . ', vendor ' . ($p['vendor'] ?: '?') . ', ' . count($p['lines']) . ' line(s).') : 'PO not found (or the URL is not set).', $p ? ['data' => json_encode($p, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)] : []);
+            case 'oracle_docs':
+                out(true, (new OracleSync(Settings::all()))->testDocTables());
+        }
+    }
     $sid = (int)($_POST['scale_id'] ?? 0);
     $c = cfg_from_post($sid);
     switch ($_POST['action'] ?? '') {

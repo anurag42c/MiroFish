@@ -127,3 +127,25 @@
   });
   refresh(); setInterval(refresh, 2000);
 })();
+
+// Document screens: upload spinner, tag switch, editable line items
+(function () {
+  const up = document.getElementById('upform');
+  if (up) {
+    up.addEventListener('submit', () => { const m = document.getElementById('upmsg'); m.className = 'hint busy'; m.textContent = 'Uploading and reading the document - this can take up to a minute...'; document.getElementById('upbtn').disabled = true; });
+    const lab = document.getElementById('ref_l');
+    up.querySelectorAll('input[name=doc_type]').forEach(r => r.addEventListener('change', () => { lab.textContent = r.value === 'PO_INVOICE' ? 'PO number (optional - read from the picture if left empty)' : 'Original invoice / return reference (optional)'; }));
+  }
+  const dt = document.getElementById('doc_type');
+  if (dt) {
+    const sync = () => { document.querySelectorAll('.t_po').forEach(e => e.style.display = dt.value === 'PO_INVOICE' ? '' : 'none'); document.querySelectorAll('.t_ret').forEach(e => e.style.display = dt.value === 'MATERIAL_RETURN' ? '' : 'none'); };
+    dt.addEventListener('change', sync); sync();
+  }
+  const tb = document.getElementById('lines');
+  if (tb) {
+    const renum = () => tb.querySelectorAll('tr.ln').forEach((tr, i) => tr.querySelectorAll('input').forEach(inp => { inp.name = inp.name.replace(/line\[\d+\]/, 'line[' + i + ']'); }));
+    tb.addEventListener('click', e => { if (e.target.classList.contains('rmline')) { const rows = tb.querySelectorAll('tr.ln'); if (rows.length > 1) { e.target.closest('tr').remove(); renum(); } else { rows[0].querySelectorAll('input').forEach(i => i.value = ''); } } });
+    const add = document.getElementById('addline');
+    if (add) add.addEventListener('click', () => { const last = tb.querySelector('tr.ln:last-child'); const c = last.cloneNode(true); c.querySelectorAll('input').forEach(i => { i.value = ''; i.classList.remove('missing'); }); tb.appendChild(c); renum(); });
+  }
+})();

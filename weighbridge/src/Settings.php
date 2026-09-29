@@ -36,13 +36,27 @@ final class Settings
         // Gate entry
         'gate_require_entry' => 'off',  // off | warn | block : weighing needs a gate entry (vehicle inside)
         'gate_exit_policy' => 'warn',   // off | warn | block : exit needs completed weighment, no open ticket
+        // Invoice / material-return documents (OCR, matching, transfer)
+        'ocr_provider' => 'off',        // off | claude | tesseract
+        'ocr_claude_key' => '', 'ocr_claude_model' => 'claude-opus-5-5', 'ocr_claude_url' => 'https://api.anthropic.com/v1/messages', 'ocr_effort' => 'medium',
+        'ocr_tesseract_cmd' => 'tesseract {image} stdout -l eng --psm 6',
+        'doc_max_mb' => '10', 'doc_date_order' => 'DMY',
+        'doc_match_days' => '5', 'doc_qty_tol_pct' => '2', 'doc_scan_days' => '14', 'doc_scan_grace_h' => '24',
+        'doc_targets' => 'none',        // none | oracle | sap | both
+        'doc_send_policy' => 'no_high', // no_high: hold documents that have open HIGH exceptions | any
+        'ora_doc_table' => 'WB_DOCUMENTS', 'ora_doc_line_table' => 'WB_DOCUMENT_LINES',
+        'sap_url' => '', 'sap_auth' => 'basic', 'sap_user' => '', 'sap_pass' => '', 'sap_token' => '', 'sap_client' => '',
+        'sap_csrf' => '1', 'sap_ref_path' => '', 'sap_po_url' => '', 'sap_timeout' => '15',
         // oracle
         'ora_enabled' => '0', 'ora_host' => '', 'ora_port' => '1521', 'ora_service' => '',
         'ora_user' => '', 'ora_pass' => '', 'ora_table' => 'WEIGHBRIDGE_TICKETS', 'ora_batch' => '50',
     ];
-    public const SECRETS = ['ora_pass', 'cam_pass', 'anpr_key'];
+    public const SECRETS = ['ora_pass', 'cam_pass', 'anpr_key', 'ocr_claude_key', 'sap_pass', 'sap_token'];
 
     private static ?array $cache = null;
+    private static array $over = [];        // unsaved values used by the Setup "Test" buttons
+
+    public static function override(array $values): void { self::$over = $values; }
 
     public static function all(): array
     {
@@ -54,7 +68,7 @@ final class Settings
                 }
             } catch (Throwable) {}
         }
-        return self::$cache;
+        return self::$over ? array_merge(self::$cache, self::$over) : self::$cache;
     }
 
     public static function get(string $k, ?string $default = null): ?string { return self::all()[$k] ?? $default; }

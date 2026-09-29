@@ -18,6 +18,13 @@ final class Anpr
     /** OCR look-alikes folded together so 0/O, 1/I, 5/S, 8/B, 2/Z do not cause false alarms. */
     private static function canonical(string $p): string { return strtr(self::normalize($p), 'OIZSB', '01258'); }
 
+    /** Same vehicle after folding look-alike characters (no edit-distance tolerance). */
+    public static function exact(?string $a, ?string $b): bool
+    {
+        $x = self::canonical((string)$a); $y = self::canonical((string)$b);
+        return $x !== '' && $x === $y;
+    }
+
     public static function matches(string $a, string $b): bool
     {
         $x = self::canonical($a); $y = self::canonical($b);

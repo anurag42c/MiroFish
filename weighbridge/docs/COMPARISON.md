@@ -37,6 +37,8 @@ was compared; no third-party code was copied into this project.
 
 * **Gate open/close interface + gate entry program** – boom-barrier control (HTTP/TCP/serial/Modbus), gate-pass register, blocklist, exit rules, weighbridge boom automation, event log.
 
+* **Invoice OCR + matching + exceptions + SAP/Oracle transfer** – not found in any of the public projects reviewed (they store weights only); uses a pluggable reader (Claude vision or Tesseract), a human verification step, and the weighbridge ticket as the reference.
+
 ## Not implemented (honest gaps)
 
 * Barrier position/safety sensing (the software sends commands; it does not read limit switches or loops), fully unattended admission from a loop-detector trigger.

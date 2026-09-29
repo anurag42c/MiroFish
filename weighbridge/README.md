@@ -18,6 +18,7 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 * **Several scales on one PC** – any number of indicators (each its own COM port / RS-485 line / gateway, protocol, minimum weight and camera). One service, `bin/scale_supervisor.php`, runs a reader per enabled scale and picks up scales you add in Setup. A vehicle can be weighed in on one bridge and out on another.
 * **Plate recognition (ANPR)** – per-scale IP camera → your choice of Plate Recognizer, CodeProject.AI or a local command (OpenALPR). Auto-fills the vehicle number, and checks that the truck on the bridge is the truck on the ticket.
 * **Gate entry + gate open/close interface** – a Gate screen with big OPEN / CLOSE buttons for every boom barrier (entry, exit, weighbridge in/out), a gate-pass register (who is inside, printed pass, exit), blocked-vehicle list, and links to weighing: the weighbridge exit boom opens by itself when the weighing completes, and a truck cannot leave with an open ticket. Barriers are driven through an IP relay/HTTP API, a raw TCP or USB/serial relay board, or a Modbus coil (RS-485 or TCP).
+* **Invoice OCR, weighbridge matching and exceptions** – upload a picture/PDF of a purchase invoice or a material-return document (phone camera works), tag it *PO invoice* or *Material return*, let Claude vision or offline Tesseract read it, check it beside the picture, verify. The document is matched with the weighbridge ticket(s) (vehicle, challan no., supplier, material, weight, date), quantity is compared with the net weight, PO and original-invoice checks are made, and every difference becomes an **exception** (also: weighed-but-no-invoice). Verified documents are sent to **SAP** (HTTP endpoint, CSRF handshake, basic/bearer) and/or **Oracle** tables, held while HIGH exceptions are open, and re-sent when they change.
 * **Simulator mode** – installs in simulator mode so you can try everything with no hardware.
 
 ## Files
@@ -25,7 +26,7 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | Path | Purpose |
 |---|---|
 | `public/` | Web root (login, weighing, reports, masters, **setup**, ticket slip) |
-| `src/` | Db, Settings (secrets encrypted), Scales, Gates, GateEntries, Auth, SerialPort, ScaleParser, Modbus, ScaleReader, Camera, Anpr, OracleSync, Weighment |
+| `src/` | Db, Settings (secrets encrypted), Scales, Gates, GateEntries, Auth, SerialPort, ScaleParser, Modbus, ScaleReader, Camera, Anpr, OracleSync, Weighment, **Documents, Ocr, OcrParser, PurchaseOrders, Sap, DocMatch, DocSync** |
 | `bin/scale_supervisor.php` | **The service to run**: starts/restarts one reader per enabled scale, and performs gate auto-close |
 | `bin/scale_daemon.php` | Reader for one scale (`--scale=ID`), started by the supervisor |
 | `bin/sync_oracle.php` | Oracle push service (`--loop=30`) |
@@ -34,7 +35,7 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | `tests/run.php` | Automated tests |
 | `bin/check.php` | Pre-flight check of the PC (PHP, extensions, folders, serial ports, Oracle driver, scale readers) |
 | `start.sh`, `start.bat` | One-click quick start (checks, readers + web server) |
-| `docs/PRODUCT_MANUAL.pdf` / `.md` | Product manual for the client, with screenshots (`docs/screenshots/`) |
+| `docs/PRODUCT_MANUAL.pdf` / `.md` | Product manual for the client, with screenshots (`docs/screenshots/`) - chapter 13 covers invoices/OCR/exceptions, Appendix G the SAP data contract, Appendix H the exception catalogue |
 | `VERSION`, `CHANGELOG.md` | Version information |
 | `docs/COMPARISON.md` | Comparison with public GitHub weighbridge projects |
 | `deploy/` | systemd units, Windows NSSM installer |
@@ -188,6 +189,15 @@ Plate comparison ignores spaces/dashes and OCR look-alikes (0/O, 1/I, 5/S, 8/B, 
 3. The truck is weighed as usual; its ticket is linked to the gate entry. *Setup → Gates → Gate entry rules* can require a gate entry before weighing (off / warn / block).
 4. At the exit, press **Exit & open** on the vehicle: with the exit rule on *block*, it is refused while a ticket is still open or (for delivery/dispatch) no weighing was completed. The pass then shows in, out, both gates, operators and tickets.
 
+## Step 8f – Invoice / return documents (optional)
+
+1. **PHP**: enable `gd` and `exif` (and `curl`), and in `php.ini` set `upload_max_filesize = 12M`, `post_max_size = 16M` (phone photos; PHP's default 2M is too small). `php bin/check.php` warns about all of this.
+2. **Reader** (Setup → *Documents & OCR*): *Claude* (Anthropic API key; pictures are sent to Anthropic; best for photos/PDFs) or *Tesseract* (offline; `apt install tesseract-ocr`, or the UB-Mannheim build on Windows; PDFs also need `pdftoppm`). Press *Read the sample* with a real invoice before saving.
+3. **PO list** (Documents → Purchase orders): import a CSV export of open POs (`po_no, line_no, vendor, material, description, qty, uom, rate`; SAP names `EBELN, EBELP, NAME1, MATNR, TXZ01, MENGE, MEINS, NETPR` work). Optional: a SAP PO-lookup URL with `{po}`.
+4. **Targets**: Oracle - run the `WB_DOCUMENTS` part of `sql/oracle_schema.sql`; SAP - give your SAP team the JSON contract (manual Appendix G) and enter their endpoint, login and (for Gateway services) tick the CSRF handshake. The background `bin/sync_oracle.php --loop=30` service sends documents too.
+5. **Use**: Documents → Upload → check against the picture (yellow = missing/unit) → *Save & Verify* → look at the match panel and *Exceptions*. Exceptions need a note to resolve; only an administrator can waive. Documents with open HIGH exceptions are held until released (policy setting).
+6. **Matching rules** (defaults): ±5 days, 2 % quantity tolerance, weighed-but-no-invoice after 24 h.
+
 ## Step 9 – Daily use
 
 1. **Weighing** page: the green display shows live weight and STABLE/MOTION. Buttons enable only when stable.
@@ -206,9 +216,9 @@ Plate comparison ignores spaces/dashes and OCR look-alikes (0/O, 1/I, 5/S, 8/B, 
 
 ## Production readiness
 
-**Verified here (automated, `php tests/run.php` - 161 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; multi-scale isolation and a supervisor that starts/stops real reader processes, the v1→v3 data upgrade, the ANPR clients against mock Plate Recognizer / CodeProject.AI / OpenALPR-style services, ticket rules with plate OK/MISMATCH/UNREAD/NOIMG under warn and block policies, gate control against a mock HTTP relay, a mock TCP relay, Modbus TCP, and fake USB/RS-485 relay boards on pseudo-terminals (exact bytes on the wire), pulse timing, auto-close, gate-pass rules and boom automation, plus an HTTP smoke test of every page and API, a read from a real tty device (pseudo-terminal), and backup + integrity check.
+**Verified here (automated, `php tests/run.php` - 318 checks):** ASCII parsing (split frames, ETX, flags, divisor), Modbus RTU CRC/decoding, ticket rules (stability, minimum weight, gross>tare, stored tare, duplicate open ticket, cancel-after-sync), secret encryption, login lockout, input validation; multi-scale isolation and a supervisor that starts/stops real reader processes, the v1→v3 data upgrade, the ANPR clients against mock Plate Recognizer / CodeProject.AI / OpenALPR-style services, ticket rules with plate OK/MISMATCH/UNREAD/NOIMG under warn and block policies, gate control against a mock HTTP relay, a mock TCP relay, Modbus TCP, and fake USB/RS-485 relay boards on pseudo-terminals (exact bytes on the wire), pulse timing, auto-close, gate-pass rules and boom automation, invoice reading with **real Tesseract on rendered invoice images** (clean, small, JPEG-compressed), the Claude request/response handling against a mock API (exact request shape, error mapping), matching and every exception code, PO and return checks, SAP handshake/retry/hold/re-send logic against a mock SAP Gateway, plus an HTTP smoke test of every page and API and a scripted browser run of the whole upload -> verify -> match -> exception -> send flow, a read from a real tty device (pseudo-terminal), and backup + integrity check.
 
-**Not verified by the author - do these on site before go-live:** real indicator/RS-485 wiring and Modbus map, **plate-reading accuracy on your camera and trucks (only the client code is tested, against mock services - try your own pictures in Setup > Plate recognition; do not use *Block* until you have),** several real ports at once, **your real barrier/relay wiring and controller behaviour (test with the barrier isolated and people clear of it)**, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
+**Not verified by the author - do these on site before go-live:** the Claude reader on your real invoices (no API key was available here - only the request/response handling is tested, against a mock), OCR accuracy on your own paper and phone photos, **a live SAP system** (tested against a simulated Gateway only) and the SAP-side service that receives the JSON, real indicator/RS-485 wiring and Modbus map, **plate-reading accuracy on your camera and trucks (only the client code is tested, against mock services - try your own pictures in Setup > Plate recognition; do not use *Block* until you have),** several real ports at once, **your real barrier/relay wiring and controller behaviour (test with the barrier isolated and people clear of it)**, a real Oracle instance (`oci8`, the MERGE statement and table), Windows service scripts, and load with your camera. Run the go-live checklist above with a known test weight.
 
 Added for production: login lockout, CSP/security headers, allow-listed port/host values, `BEGIN IMMEDIATE` ticket numbering, cancellation propagated to Oracle, optional camera snapshot per weighment, read-only ERP REST API (`Setup > General`), health endpoint `api/health.php` (HTTP 503 when the scale daemon is down - point your uptime monitor at it), daily backup script:
 
@@ -237,6 +247,8 @@ See `docs/COMPARISON.md` for how this compares with public GitHub projects.
 | Gate button says *relay unreachable / did not reply* | Check IP/port or COM port, wiring A/B, slave id; use *Test OPEN* in Setup > Gates; a Modbus board that never answers needs *Require echo reply* unticked |
 | Barrier does nothing but the log says OK | Wrong relay channel/coil, or the controller needs a longer pulse (raise *Pulse length*) |
 | Gate did not auto-close | Supervisor service not running, or *Auto-close* is 0 |
+| Upload says the file is too large | `upload_max_filesize` / `post_max_size` in php.ini (10M / 12M or more) |
+| Invoice not read / units missing | Setup → Documents & OCR → *Read the sample*; use Claude for photos; choose the unit by hand (the exceptions box suggests it) |
 | Windows: port busy | Another program (indicator utility) holds the COM port |
 | Scale shows *Reader not running* | Supervisor service not running (`journalctl -u weighbridge-scale`), or scale not Enabled |
 | Second scale: *already uses /dev/ttyUSB0* | Each scale needs its own port; use by-id names |

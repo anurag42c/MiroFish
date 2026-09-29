@@ -22,6 +22,8 @@ page_head('Ticket ' . $w['ticket_no']);
     <tr><th>Gross</th><td><b><?= $kg($w['gross_kg']) ?></b></td><th>Tare</th><td><b><?= $kg($w['tare_kg']) ?></b></td></tr>
     <tr><th>NET WEIGHT</th><td colspan="3" style="font-size:22px"><b><?= $kg($w['net_kg']) ?></b></td></tr>
   </table>
+  <?php $docs = Db::all("SELECT d.id, d.doc_no, d.invoice_no, d.supplier, d.match_status FROM document_tickets dt JOIN documents d ON d.id = dt.doc_id WHERE dt.ticket_id = ? AND dt.link <> 'BLOCK' AND d.status <> 'CANCELLED'", [$w['id']]); ?>
+  <?php if ($docs): ?><p class="noprint"><b>Invoice / return document:</b> <?php foreach ($docs as $x) echo '<a href="document.php?id=' . (int)$x['id'] . '">' . e($x['doc_no']) . '</a> (' . e($x['invoice_no']) . ', ' . e($x['supplier']) . ', ' . e($x['match_status']) . ') '; ?></p><?php endif; ?>
   <p><?= e($w['remarks']) ?></p>
   <?php foreach (['first_img' => '1st', 'second_img' => '2nd'] as $c => $l) if ($w[$c]) echo '<img src="snapshot.php?f=' . e($w[$c]) . '" alt="' . $l . ' weighment photo" style="max-width:48%;margin-right:1%">'; ?>
   <p class="noprint"><button onclick="print()">Print</button> <a class="btn sec" href="index.php">Back</a></p>

@@ -94,6 +94,41 @@ CREATE TABLE IF NOT EXISTS gate_entries (
   operator TEXT, exit_operator TEXT, override_note TEXT);
 CREATE INDEX IF NOT EXISTS ix_gentry_status ON gate_entries(status, vehicle_no);
 SQL);
+        self::pdo()->exec(<<<'SQL'
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY, doc_no TEXT UNIQUE NOT NULL,
+  doc_type TEXT NOT NULL DEFAULT 'PO_INVOICE',        -- PO_INVOICE | MATERIAL_RETURN
+  status TEXT NOT NULL DEFAULT 'UPLOADED',            -- UPLOADED, EXTRACTED, VERIFIED, CANCELLED
+  file TEXT, mime TEXT, orig_name TEXT,
+  ocr_provider TEXT, ocr_conf REAL, ocr_warnings TEXT, ocr_error TEXT, ocr_raw TEXT,
+  invoice_no TEXT, invoice_date TEXT, supplier TEXT, supplier_tax_id TEXT, buyer TEXT,
+  po_no TEXT, ref_no TEXT, orig_invoice_no TEXT, vehicle_no TEXT, transporter TEXT, eway_no TEXT,
+  currency TEXT, subtotal REAL, tax_amount REAL, total_amount REAL, remarks TEXT,
+  uploaded_by TEXT, uploaded_at TEXT, verified_by TEXT, verified_at TEXT, updated_at TEXT,
+  match_status TEXT NOT NULL DEFAULT 'UNMATCHED',     -- UNMATCHED, MATCHED, REVIEW, EXCEPTION
+  exc_high INTEGER NOT NULL DEFAULT 0, exc_warn INTEGER NOT NULL DEFAULT 0,
+  wb_net_kg REAL, wb_tickets TEXT,
+  payload_hash TEXT,
+  oracle_status TEXT NOT NULL DEFAULT 'NA', oracle_hash TEXT, oracle_at TEXT, oracle_error TEXT,
+  sap_status TEXT NOT NULL DEFAULT 'NA', sap_hash TEXT, sap_at TEXT, sap_ref TEXT, sap_error TEXT, sync_tries INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS ix_doc_status ON documents(status, doc_type);
+CREATE INDEX IF NOT EXISTS ix_doc_inv ON documents(invoice_no);
+CREATE TABLE IF NOT EXISTS document_lines (
+  id INTEGER PRIMARY KEY, doc_id INTEGER NOT NULL, line_no INTEGER NOT NULL,
+  material_code TEXT, description TEXT, hsn TEXT, qty REAL, uom TEXT, rate REAL, amount REAL, qty_kg REAL);
+CREATE INDEX IF NOT EXISTS ix_dl_doc ON document_lines(doc_id);
+CREATE TABLE IF NOT EXISTS document_tickets (
+  doc_id INTEGER NOT NULL, ticket_id INTEGER NOT NULL, link TEXT NOT NULL DEFAULT 'AUTO', score REAL, PRIMARY KEY (doc_id, ticket_id));
+CREATE TABLE IF NOT EXISTS doc_exceptions (
+  id INTEGER PRIMARY KEY, doc_id INTEGER, ticket_id INTEGER, code TEXT NOT NULL, severity TEXT NOT NULL, message TEXT,
+  ekey TEXT UNIQUE NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN',   -- OPEN, RESOLVED, WAIVED
+  note TEXT, updated_by TEXT, updated_at TEXT, created_at TEXT);
+CREATE INDEX IF NOT EXISTS ix_dexc ON doc_exceptions(status, severity);
+CREATE TABLE IF NOT EXISTS po_lines (
+  id INTEGER PRIMARY KEY, po_no TEXT NOT NULL, line_no TEXT, vendor TEXT, material_code TEXT, description TEXT,
+  qty REAL, uom TEXT, rate REAL, po_date TEXT, source TEXT NOT NULL DEFAULT 'CSV');
+CREATE INDEX IF NOT EXISTS ix_po ON po_lines(po_no);
+SQL);
         $vc = array_column(self::all('PRAGMA table_info(vehicles)'), 'name');
         foreach (['blocked' => 'INTEGER NOT NULL DEFAULT 0', 'block_reason' => 'TEXT'] as $c => $t) {
             if (!in_array($c, $vc, true)) { self::pdo()->exec("ALTER TABLE vehicles ADD COLUMN $c $t"); }

@@ -1,6 +1,6 @@
 # Weighbridge Management System — Product Manual
 
-**Version 1.0.0** &nbsp;·&nbsp; Truck weighing, gate entry, plate recognition and Oracle integration
+**Version 1.1.0** &nbsp;·&nbsp; Truck weighing, gate entry, plate recognition, invoice OCR with weighbridge matching, and SAP / Oracle integration
 
 | | |
 |---|---|
@@ -25,10 +25,11 @@
 10. Daily operation — weighbridge operator
 11. Daily operation — security gate
 12. Reports, tickets and the ERP interface
-13. Administration
-14. Security
-15. Troubleshooting
-16. Appendices (settings reference, database, formats, checklists, glossary)
+13. Invoice and return documents (OCR, matching, exceptions)
+14. Administration
+15. Security
+16. Troubleshooting
+17. Appendices (settings, database, formats, checklists, SAP data contract, exception catalogue, glossary)
 
 ---
 
@@ -45,7 +46,8 @@ The **Weighbridge Management System** records every truck that is weighed on you
 | Plate recognition | Optional. Reads the vehicle number from a camera, fills the form, and checks that the truck on the bridge is the truck on the ticket. |
 | Gate entry | Register vehicles at the gate, print a gate pass, keep a live list of vehicles inside, block problem vehicles, control the exit. |
 | Gate barriers | OPEN / CLOSE buttons for every boom barrier; barriers can open automatically when a weighing completes. |
-| Oracle | Completed tickets are sent to your Oracle table automatically, safely and without duplicates, even if the network is temporarily down. |
+| Invoice documents | Upload a picture or PDF of a purchase invoice or a material-return document; the system reads it (OCR), you check it, and it is **matched with the weighbridge tickets**. Differences (wrong quantity, wrong truck, no ticket, double billing, over PO quantity…) are listed as **exceptions**. Verified documents are sent to **SAP** and/or **Oracle**. |
+| Oracle / SAP | Completed tickets are sent to your Oracle table automatically, safely and without duplicates, even if the network is temporarily down. |
 | Control | Users and roles, audit trail, reports with CSV export, backups, a read-only interface for ERP systems. |
 
 **Important limits**
@@ -69,7 +71,7 @@ The **Weighbridge Management System** records every truck that is weighed on you
 The program runs on **one PC (the "weighbridge server")** next to the weighbridge. Operators use it from a web browser — on that PC, or from any other PC, laptop or tablet on the network. There are two background programs:
 
 * **Scale supervisor** – starts a reader for every enabled scale, restarts it if it stops, and closes gates after their auto-close time.
-* **Oracle sync** *(optional)* – sends completed tickets to Oracle every 30 seconds.
+* **Oracle sync** *(optional)* – sends completed tickets, and verified documents (to Oracle and/or SAP), every 30 seconds.
 
 **Screens**
 
@@ -77,6 +79,8 @@ The program runs on **one PC (the "weighbridge server")** next to the weighbridg
 |---|---|---|
 | **Weighing** | Operator | Live weight of each scale, create tickets, second weighment |
 | **Gate** | Security | Gate OPEN/CLOSE, register vehicles, vehicles inside, exit |
+| **Documents** | Everyone | Upload invoices / return documents, review, verify, send |
+| **Exceptions** | Everyone | Differences between documents and the weighbridge; weighed-but-no-invoice |
 | **Reports** | Everyone | Find tickets, totals, CSV, Oracle status |
 | **Masters** | Everyone (delete/block: admin) | Vehicles (with stored tare), parties, materials |
 | **Setup** | Administrator | Scales, gates, plate recognition, Oracle, company details, users, diagnostics |
@@ -89,6 +93,8 @@ The program runs on **one PC (the "weighbridge server")** next to the weighbridg
 | Add vehicles, parties, materials | ✔ | ✔ |
 | Cancel a ticket or gate entry, delete master data, block vehicles | | ✔ |
 | Override a blocked vehicle, plate mismatch or exit rule (reason is recorded) | | ✔ |
+| Upload, read, verify documents; link tickets; mark exceptions resolved (with a note) | ✔ | ✔ |
+| Waive an exception, cancel a document, send a held document anyway | | ✔ |
 | Setup page, users, send to Oracle now | | ✔ |
 
 ---
@@ -111,6 +117,8 @@ The program runs on **one PC (the "weighbridge server")** next to the weighbridg
 | Web browser | Chrome, Edge or Firefox (current). |
 | Oracle client *(optional)* | PHP `oci8` extension and Oracle Instant Client, only for Oracle integration. |
 | Plate recognition service *(optional)* | CodeProject.AI Server, Plate Recognizer, or OpenALPR. |
+| Invoice reader *(optional, one of)* | An **Anthropic API key** (Claude reads photos and PDFs; needs internet, documents are sent to Anthropic) **or** **Tesseract OCR** installed on the PC (offline; best for clean scans). Without either, documents are typed in by hand. |
+| PHP extensions for documents *(recommended)* | `gd` and `exif` (turns phone photos upright and resizes them), `curl`. |
 
 There is nothing else to install: no separate database server, no Composer, no Node.js.
 
@@ -140,6 +148,13 @@ Follow **either** 4.1 (Windows) or 4.2 (Linux). Then continue with section 5.
    extension=sodium
    extension=mbstring
    extension=curl
+   extension=gd
+   extension=exif
+   ```
+   Also set the upload limits so phone photos of invoices are accepted (PHP's default of 2 MB is too small):
+   ```
+   upload_max_filesize = 12M
+   post_max_size = 16M
    ```
    Add `C:\php` to the system **PATH** (Windows Settings → search "environment variables").
 3. **Copy the program.** Copy the whole `weighbridge` folder to `C:\weighbridge`.
@@ -157,7 +172,7 @@ Follow **either** 4.1 (Windows) or 4.2 (Linux). Then continue with section 5.
 
 ```bash
 sudo apt update
-sudo apt install -y php-cli php-sqlite3 php-mbstring php-curl nginx php-fpm   # or apache2 + libapache2-mod-php
+sudo apt install -y php-cli php-sqlite3 php-mbstring php-curl php-gd nginx php-fpm   # or apache2 + libapache2-mod-php
 sudo mkdir -p /var/www && sudo cp -r weighbridge /var/www/weighbridge
 sudo chown -R www-data:www-data /var/www/weighbridge/data
 sudo chmod 750 /var/www/weighbridge/data
@@ -195,7 +210,7 @@ server {
 |---|---|
 | `public/` | The screens (the only folder the web server publishes) |
 | `src/`, `bin/` | Program code and background programs |
-| `data/` | **Your data**: `weighbridge.sqlite` (database), `app.key` (encryption key), `snapshots/` (camera photos), `logs/` (reader logs), `backups/` |
+| `data/` | **Your data**: `weighbridge.sqlite` (database), `app.key` (encryption key), `snapshots/` (camera photos), `logs/` (reader logs), `documents/` (uploaded invoice pictures and PDFs), `backups/` |
 | `sql/oracle_schema.sql` | Oracle table script |
 | `deploy/` | Service files for Linux and Windows |
 | `docs/` | This manual, screenshots, comparison notes |
@@ -237,6 +252,7 @@ See section 6. Switch the scale from *Simulator* to the real port, test, and sav
 
 ## Step 7 — Optional modules
 
+* Invoice pictures, matching and exceptions: section 13
 * Cameras / plate recognition: section 7
 * Gates and barriers: section 8
 * Oracle: section 9
@@ -444,11 +460,15 @@ Install **Oracle Instant Client (Basic)** matching PHP's 32/64 bit, and the PHP 
 * *Reports* shows the Oracle status of each ticket: **PENDING** (waiting), **SYNCED**, **FAILED** (hover for the Oracle error), **NA** (Oracle not enabled).
 * Administrators can press **Send to Oracle now** or **Re-queue failed**.
 * *Setup → Diagnostics* shows the number waiting and the last error.
-* `http://<server>/api/health.php` returns `503` when a scale reader is not running — use it with your monitoring system.
+* `http://<server>/api/health.php` returns `503` when a scale reader is not running — use it with your monitoring system. It also reports how many documents wait to be verified or sent and how many HIGH exceptions are open.
 
 ## 9.6 Columns
 
 See Appendix B.
+
+## 9.7 Invoice documents
+
+Verified invoice and return documents can also be written to two more Oracle tables, `WB_DOCUMENTS` and `WB_DOCUMENT_LINES` (script in `sql/oracle_schema.sql`, columns in Appendix B2). The same connection is used; choose the target in *Setup → Documents & OCR* (section 13).
 
 ---
 
@@ -567,13 +587,177 @@ It returns completed and cancelled tickets with `id` greater than `since_id` (ma
 
 ---
 
-# 13. Administration
+# 13. Invoice and return documents (OCR, matching, exceptions)
 
-## 13.1 Users
+## 13.1 What it does
+
+Purchase invoices and material-return documents arrive on paper or as pictures. This module turns each one into a structured **document**, checks it against what the weighbridge actually recorded, and passes it on to SAP and/or Oracle:
+
+```
+ picture / PDF ──► read (OCR) ──► you check & verify ──► match with weighbridge tickets ──► exceptions
+                                                                     │
+                                       verified documents ──────────►├──► SAP  (HTTP endpoint)
+                                                                     └──► Oracle tables
+```
+
+* **Two tags**: *Purchase invoice (PO)* – goods received against a purchase order; *Material return* – goods sent back to the supplier (return challan, debit note, rejection note).
+* **A person always verifies.** OCR can misread a digit. The reader's result is shown next to the picture, unsure fields are highlighted, and nothing counts as "verified" until someone presses **Save & Verify**.
+* **The weighbridge is the referee.** The quantity on the invoice is compared with the net weight of the linked ticket(s); the truck, supplier, material and date are compared too.
+
+## 13.2 Setting it up (administrator)
+
+*Setup → Documents & OCR.*
+
+![Documents and OCR settings](screenshots/15-setup-documents.png)
+
+**1. Choose how pictures are read**
+
+| | **Claude** (Anthropic API) | **Tesseract** (offline) |
+|---|---|---|
+| Good at | Phone photos, skewed or creased pages, PDFs, any layout, units and line items | Clean scans and screenshots |
+| Weaker at | Needs internet | Photos and unusual layouts; often loses the unit (MT/KG) or cannot find line items |
+| Where the picture goes | **Sent to the Anthropic API** | Stays on your PC |
+| Cost | Pay per use to Anthropic | Free |
+| Set-up | API key (and optionally a model name) | Install Tesseract; nothing else |
+
+Try both with about ten of your own invoices before deciding: use **Read the sample** on the same page (it works before saving). Setting *Thinking effort* to *low* makes Claude faster and cheaper; *high* helps very messy documents. The model name can be changed if you prefer a different one. On Windows install the "UB Mannheim" build of Tesseract; `php bin\check.php` tells you whether it is found. PDF files with Tesseract also need `pdftoppm` (poppler) – otherwise upload JPEG/PNG or use the Claude reader.
+
+**2. Matching rules** – date window (default ±5 days), quantity tolerance (default 2 %), and how long a weighed truck may go without an invoice before it is listed (default 24 hours, looking back 14 days). Dates on your documents are read day-first unless you change it.
+
+**3. Where verified documents go** – *Nowhere*, *Oracle tables*, *SAP (HTTP)* or both; and whether documents with open HIGH exceptions are **held** (recommended) or sent anyway.
+
+**4. SAP** – see 13.9. **5. Oracle** – table names (see 9.7).
+
+**6. PHP upload limits** – make sure `upload_max_filesize` is at least 10M and `post_max_size` at least 12M in `php.ini` (`php bin/check.php` warns if not).
+
+## 13.3 Uploading a document
+
+*Documents* → **Upload an invoice or return document**.
+
+![Upload](screenshots/16-documents-upload.png)
+
+1. Choose the tag: **Purchase invoice** or **Material return**.
+2. Optionally type the PO number (or, for a return, the original invoice / return reference). If left empty it is read from the picture.
+3. Choose the file. **On a phone or tablet this opens the camera.** JPEG, PNG or PDF, up to 10 MB (changeable).
+4. Leave *Read the details automatically* ticked and press **Upload**. Reading takes a few seconds (Tesseract) up to about a minute (Claude with long PDFs). You are taken to the review screen.
+
+*Photo tips:* put the page flat on a plain surface, fill the frame, use good light without shadow or glare, hold the phone parallel to the page, and make sure the invoice number, date, quantity and totals are sharp. One file = one document; a multi-page invoice should be uploaded as one PDF.
+
+## 13.4 Reviewing and verifying
+
+![Review](screenshots/17-document-review.png)
+
+* **Left:** the original picture (click to open it full size) and the reader's own warnings ("The reader was unsure about…").
+* **Right:** the details in editable fields. **Yellow fields are empty** (or a quantity has no unit). Compare every important number with the picture: invoice number, date, supplier, PO number, vehicle number, each line's quantity, **unit**, rate and amount, and the totals.
+* **The unit matters.** The weight check needs a unit such as MT or KG. If OCR could not read it, choose it on each line. (The exceptions box suggests the likely unit from the weighbridge weight: "The weighbridge weight suggests it is MT".)
+* Wrong tag? Change *Tag* – the PO field or the original-invoice fields appear accordingly.
+* Add or remove line items with **+ Add line** and **×**.
+
+Buttons: **Save** (keep working on it), **Save & Verify** (locks the document, matches it, queues it for sending), **Read again** (replaces the fields with a fresh reading), **Match again**, and for administrators **Cancel document**. A verified document can be **Reopened** for corrections; it is sent again if anything changed.
+
+![Verified document](screenshots/18-document-verified.png)
+
+## 13.5 Matching with the weighbridge
+
+Every time a document is saved, verified or re-matched, the system looks for the weighbridge ticket(s) it belongs to. Purchase invoices are matched to **INWARD** tickets, material returns to **OUTWARD** tickets.
+
+| Evidence | Points |
+|---|---|
+| Challan number on the ticket equals the invoice number | 60 |
+| Vehicle number identical (look-alike letters/digits such as 0/O and 1/I count as the same) | 50 |
+| Vehicle number differs by one character | 30 (a possible misread – needs other evidence) |
+| Supplier resembles the ticket's party | up to 15 |
+| Invoice item resembles the ticket's material | up to 10 |
+| Invoice quantity equals the ticket net weight within the tolerance | 15 |
+| Ticket date within a day of the document date | 5 |
+
+A ticket scoring **50 or more** is linked automatically (marked **AUTO**). If the invoice quantity is larger than the first ticket, further trips of the same truck are added until the quantity is reached (a **split load**). A ticket already linked to another document is not taken over. **Possible tickets** lists other candidates with the reason; press **Link** to link one by hand (**MANUAL**) or **Unlink** to remove a wrong one – the system will not put an unlinked ticket back by itself.
+
+**Quantity check.** The invoice quantity in kilograms (MT, KG, QTL and grams are converted) is compared with the total net weight of the linked tickets. *Service and charge lines* (loading, handling, freight, HSN codes starting 99…) are not counted as goods, so "Iron ore 28.5 MT" plus "Loading charges 28.5 MT" is compared as 28.5 MT. Items counted in pieces, litres or bags cannot be compared with a weight; they are marked "quantity not checked". A difference within the tolerance is fine; a larger one raises **QTY_MISMATCH** and shows both numbers.
+
+The **match status** shown on the document and in the list:
+
+| Status | Meaning |
+|---|---|
+| **MATCHED** | Ticket(s) linked and no open HIGH exception or warning |
+| **REVIEW** | Ticket(s) linked; only warnings are open |
+| **EXCEPTION** | At least one open HIGH exception |
+| **UNMATCHED** | No ticket linked |
+
+## 13.6 Exceptions
+
+![A quantity exception](screenshots/19-document-exception.png)
+
+Each difference is an **exception** with a severity: **HIGH** (money or goods at risk – holds sending by default), **WARN** (check it) or **INFO** (for your information). The complete list with what to do is in Appendix H. Exceptions appear on the document and on the **Exceptions** screen; the menu shows the number of open HIGH exceptions.
+
+![Exceptions screen](screenshots/22-exceptions.png)
+
+To deal with one, write a short **note** and press:
+
+* **Resolved** – you looked into it and it is dealt with (for example "Supplier confirmed 1.3 t short, credit note requested"). Any user can do this.
+* **Waive** *(administrator)* – accept the difference and release the document.
+* **Reopen** – undo the decision.
+
+Your decision, name and note are kept and travel with the document to SAP/Oracle. If the underlying cause disappears (a ticket is linked, a quantity corrected) the exception is removed automatically; if the same problem persists, your decision is kept and it is not raised again.
+
+**Weighed, but no invoice.** The Exceptions screen also lists **inward tickets that no document has been linked to** after the grace period (default 24 hours, last 14 days). Upload the invoice, or link the ticket to the document, and it drops off the list. This catches deliveries that arrived without paperwork and invoices that never came.
+
+## 13.7 Purchase orders (PO list)
+
+Purchase invoices are checked against the purchase order. *Documents → Purchase orders* imports a **CSV** export of your open POs (one row per PO line, first row = column titles). Recognised titles: `po_no, line_no, vendor, material, description, qty, uom, rate, po_date` – SAP field names such as `EBELN, EBELP, NAME1, MATNR, TXZ01, MENGE, MEINS, NETPR` are understood too. Comma, semicolon or tab separated. Importing a PO again replaces its lines.
+
+If the PO is not in the list and a **PO lookup URL** is configured for SAP (13.9), it is fetched from SAP on demand and remembered. If neither a list nor a lookup exists, the PO is simply not verified (INFO).
+
+![PO list](screenshots/20-po-master.png)
+
+Checks made: the PO number is present; the PO exists; the supplier is the PO's vendor; each invoiced item is on the PO (by material code or by description); the rate matches the PO rate (within 1 %); and the **total quantity invoiced against the PO line by all documents** does not exceed the ordered quantity (plus tolerance).
+
+## 13.8 Material returns
+
+Tag the document *Material return*. The system reads the **original invoice number** it refers to and checks: the return names an invoice; that invoice is among the uploaded documents; the return is to the same supplier; the returned items are on that invoice; and the **total returned** (this and earlier returns) does not exceed the quantity invoiced. It is matched with an **OUTWARD** weighbridge ticket of the truck that carried the material back.
+
+## 13.9 Sending to SAP and Oracle
+
+Only **verified** documents are sent. In the document list the columns show **ORA / SAP** status: PENDING, SYNCED, FAILED (hover for the reason) or HELD.
+
+![Document list](screenshots/21-documents-list.png)
+
+* **Held.** With the recommended policy a document with open HIGH exceptions is **held**: resolve or waive them and it is released. An administrator can tick *send anyway* (the exceptions are included in the data).
+* **Automatic.** The background service sends pending documents every 30 seconds and retries failures. **Send now** on the document sends immediately.
+* **Changes are re-sent.** If anything that is part of the data changes after sending (edits, linked tickets, an exception decision), the document becomes PENDING and the update is delivered.
+* **Independent targets.** If Oracle is down but SAP is up, SAP is still updated; each target has its own status and retry.
+
+**SAP.** The program **POSTs the document as JSON** (Appendix G) to an HTTPS endpoint you provide, and treats any 2xx answer as accepted. On the SAP side your team connects that endpoint to whatever should happen – for example an OData / ICF service, an SAP Integration Suite / API Management flow, or a BAPI or RFC wrapped in an HTTP service (invoice verification, a staging table, a workflow…). *Setup → Documents & OCR → SAP* takes:
+
+| Field | Meaning |
+|---|---|
+| Endpoint | The URL that receives each document |
+| Login | User + password (basic), a bearer token, or none. The SAP client number is added as `sap-client` if given |
+| CSRF handshake | Tick for SAP Gateway services: the program first fetches a token (`X-CSRF-Token: Fetch`) and posts with it and the session cookie |
+| Document number path | Where SAP's own document number is in the answer (for example `d.MaterialDocument`); it is stored on the document |
+| PO lookup URL | Optional: a URL with `{po}` that returns the purchase order (a simple JSON, or the standard OData purchase-order shapes) |
+
+Use **Test SAP connection & login** (it sends no document) and **Test PO lookup** on the same page.
+
+**Oracle.** Two tables (`WB_DOCUMENTS`, `WB_DOCUMENT_LINES`) hold the document, its lines, the linked ticket numbers, the weighbridge net weight, the match status and the open exception codes (Appendix B2). Rows are written with an idempotent MERGE.
+
+## 13.10 Good practice and limits
+
+* **Always verify against the picture.** OCR is a helper, not an authority. Pay most attention to numbers.
+* **Start with the hold policy on** and review the exceptions daily. Adjust the tolerance to your real weighing accuracy (2 % is a starting point).
+* **Privacy.** With the Claude reader the pictures are sent to the Anthropic API. Use Tesseract if invoices must not leave your premises. Uploaded pictures are stored in `data/documents` (not reachable from the web; shown only to logged-in users).
+* **What is not done.** The program does not post accounting entries in SAP itself – it hands the data to the endpoint you provide. It reads one file per document, does not read handwriting reliably, and cannot judge whether an invoice is commercially correct beyond the checks above.
+* **Test before go-live.** Read ten real invoices with each reader, check every field, and run one document through SAP / Oracle into a test system (Appendix D, items 21–26). The SAP connection has been exercised against a simulated SAP Gateway (basic login, CSRF token, session cookie, OData purchase-order shapes) but not against a live SAP system – your SAP team should confirm the endpoint on site.
+
+---
+
+# 14. Administration
+
+## 14.1 Users
 
 *Setup → Users*: add users, enable/disable, set passwords. The administrator cannot disable their own login. After 8 failed logins for a user name or address, further attempts are refused for 10 minutes.
 
-## 13.2 Backups — **do this daily**
+## 14.2 Backups — **do this daily**
 
 ```
 php bin/backup.php --dir=D:\Backups\weighbridge --keep=30
@@ -583,14 +767,14 @@ Creates a consistent copy of the database (safe while the system is running), ve
 
 Also keep a separate copy of **`data/app.key`** — without it the saved Oracle, camera and relay passwords cannot be decrypted (you would re-enter them). Copy the `data/snapshots` folder if you need to keep evidence photos.
 
-## 13.3 Restoring / moving to another PC
+## 14.3 Restoring / moving to another PC
 
 1. Install the program on the new PC (section 4) but do not run the installer page.
 2. Stop the services. Copy your backup file to `data/weighbridge.sqlite` (delete any `weighbridge.sqlite-wal/-shm` files) and copy `app.key` to `data/`.
 3. Run `php bin/check.php`, start the services, log in.
 4. Re-check the COM port names in *Setup → Scales / Gates* (they can differ on a new PC).
 
-## 13.4 Upgrading to a new version
+## 14.4 Upgrading to a new version
 
 1. Take a backup (13.2).
 2. Stop the services.
@@ -598,7 +782,7 @@ Also keep a separate copy of **`data/app.key`** — without it the saved Oracle,
 4. Run `php bin/check.php`, then start the services. The database upgrades itself automatically the first time it is opened.
 5. Optional: `php tests/run.php` runs the self-tests in a temporary folder (it never touches your data).
 
-## 13.5 Logs and health
+## 14.5 Logs and health
 
 | What | Where |
 |---|---|
@@ -610,24 +794,26 @@ Also keep a separate copy of **`data/app.key`** — without it the saved Oracle,
 
 Camera photos in `data/snapshots` are never deleted automatically; remove old ones according to your retention policy.
 
-## 13.6 Time and date
+## 14.6 Time and date
 
 Tickets use the PC clock and timezone. The default timezone is `Asia/Kolkata`; change it by setting the environment variable `WB_TZ` (for example `WB_TZ=Africa/Nairobi`) for the services.
 
 ---
 
-# 14. Security
+# 15. Security
 
 * Passwords are stored as one-way hashes. Oracle, camera and relay passwords and the plate-recognition token are stored **encrypted** (key in `data/app.key`).
 * Every form is protected against cross-site request forgery; every database query is parameterised; browser security headers are set; repeated failed logins are locked out.
 * Weights are captured **on the server** from the reader; the browser cannot supply a weight (except the optional, flagged manual entry).
 * Setup, user management, overrides and cancellations are administrator-only and audited.
+* Uploaded invoice files are checked (real file type, size, picture dimensions), stored under random names outside the web folder, and shown only to logged-in users. The OCR command and SAP/Oracle addresses can only be set by an administrator; the OCR command is started without a shell.
+* Invoice pictures are sent to a third party only if the Claude reader is selected (Setup shows a warning).
 * Serial port names and network addresses entered in Setup are validated so they cannot be used to run commands.
 * **Recommendations:** keep the PC on a protected network; use HTTPS (reverse proxy) if the screens are reachable beyond the plant network; use individual logins; back up daily; restrict who can open the `data` folder; fit the barrier's hardware safety devices.
 
 ---
 
-# 15. Troubleshooting
+# 16. Troubleshooting
 
 First run `php bin/check.php` and look at *Setup → Diagnostics*.
 
@@ -654,6 +840,13 @@ First run `php bin/check.php` and look at *Setup → Diagnostics*.
 | `ORA-12541` / `ORA-12514` | Listener host/port or **service name** wrong. |
 | `ORA-00942` | Table missing or no rights: run `sql/oracle_schema.sql`, grant rights. |
 | Tickets stay PENDING | Oracle sync service not running or Oracle unreachable — see *Diagnostics*. |
+| Upload says the file is too large | Raise `upload_max_filesize` (10M+) and `post_max_size` (12M+) in `php.ini`, restart the web server / PHP. |
+| "OCR is switched off" / "Could not read" | *Setup → Documents & OCR*: choose a provider and use *Read the sample*. Claude: check the API key, model name and internet. Tesseract: check it is installed and the command path. |
+| Everything reads but units are empty | Normal for Tesseract on some layouts – choose the unit on each line (the Exceptions box suggests it). Use the Claude reader for photos. |
+| Document says NO_TICKET but the truck was weighed | Check vehicle number and date on the document; the ticket must be INWARD (invoice) / OUTWARD (return) and inside the date window; press *Link* under *Possible tickets*. |
+| QTY_MISMATCH on every document | Check the unit (MT vs KG) and the tolerance; service lines are ignored, but a wrong unit is not. |
+| Document stays HELD | It has open HIGH exceptions: resolve them with a note, or an administrator ticks *send anyway*. |
+| SAP: "login refused" / "CSRF token validation failed" / "endpoint not found" | Check user/password or token, SAP client, the endpoint URL, and tick *CSRF handshake* for SAP Gateway services. |
 | "Too many failed logins" | Wait 10 minutes, or ask another administrator. |
 | Screens load but look unstyled / links 404 | Web server is not pointing at the `public` folder. |
 
@@ -661,7 +854,7 @@ First run `php bin/check.php` and look at *Setup → Diagnostics*.
 
 ---
 
-# 16. Appendices
+# 17. Appendices
 
 ## Appendix A — Settings reference
 
@@ -682,6 +875,14 @@ First run `php bin/check.php` and look at *Setup → Diagnostics*.
 | ANPR minimum confidence / policy / auto-read | Plate recognition | 0.6 / flag / off |
 | Weighing requires gate entry / exit rule | Gates | off / warn |
 | Oracle host, port, service, user, password, table, batch | Oracle transfer | — / 1521 / — / — / — / `WEIGHBRIDGE_TICKETS` / 50 |
+| Invoice reader, API key, model, effort | Documents & OCR | off; —; `claude-opus-5-5`; medium |
+| Tesseract command | Documents & OCR | `tesseract {image} stdout -l eng --psm 6` |
+| Max upload / date order | Documents & OCR | 10 MB / day-first |
+| Date window / quantity tolerance | Documents & OCR | 5 days / 2 % |
+| "Weighed, no invoice": look back / grace | Documents & OCR | 14 days / 24 hours |
+| Send documents to / hold policy | Documents & OCR | nowhere / hold if HIGH exceptions |
+| Oracle document tables | Documents & OCR | `WB_DOCUMENTS`, `WB_DOCUMENT_LINES` |
+| SAP endpoint, login, client, CSRF, reference path, PO lookup, timeout | Documents & OCR | empty; basic; —; on; —; —; 15 s |
 
 ## Appendix B — Oracle table `WEIGHBRIDGE_TICKETS`
 
@@ -698,6 +899,24 @@ First run `php bin/check.php` and look at *Setup → Diagnostics*.
 | `SCALE_NAME` | VARCHAR2(100) | Scale used for the first weighment |
 | `PLATE_IN`, `PLATE_OUT`, `PLATE_FLAG` | VARCHAR2 | Plates read, and OK / MISMATCH / UNREAD / NOIMG |
 | `SYNCED_AT` | TIMESTAMP | When the row was written |
+
+### Appendix B2 — Oracle tables `WB_DOCUMENTS` and `WB_DOCUMENT_LINES`
+
+| Column (`WB_DOCUMENTS`) | Content |
+|---|---|
+| `DOC_NO` (primary key) | Document number, e.g. `DOC202609290001` |
+| `DOC_TYPE` | `PO_INVOICE` or `MATERIAL_RETURN` |
+| `INVOICE_NO`, `INVOICE_DATE` | Number and date on the document |
+| `SUPPLIER`, `SUPPLIER_TAX_ID`, `BUYER` | Parties as verified |
+| `PO_NO`, `REF_NO`, `ORIG_INVOICE_NO` | PO number; return reference; original invoice (returns) |
+| `VEHICLE_NO`, `EWAY_NO`, `CURRENCY` | Truck, e-way bill / LR, currency |
+| `SUBTOTAL`, `TAX_AMOUNT`, `TOTAL_AMOUNT` | Amounts |
+| `MATCH_STATUS` | `MATCHED`, `REVIEW`, `EXCEPTION`, `UNMATCHED` |
+| `WB_TICKETS`, `WB_NET_KG` | Linked weighbridge ticket numbers; their total net weight |
+| `EXC_HIGH`, `EXC_WARN`, `EXC_SUMMARY` | Number of open HIGH / warning exceptions; codes of the open ones |
+| `VERIFIED_BY`, `VERIFIED_AT`, `SYNCED_AT` | Who verified, when, when written |
+
+`WB_DOCUMENT_LINES` (key `DOC_NO`, `LINE_NO`): `MATERIAL_CODE, DESCRIPTION, HSN, QTY, UOM, RATE, AMOUNT, QTY_KG`.
 
 ## Appendix C — Indicator output examples
 
@@ -742,10 +961,16 @@ These are only **examples of the kind of line** indicators send. Always check yo
 | 18 | Report and CSV export match the slips | ☐ |
 | 19 | Backup taken and a test restore checked; `app.key` copied elsewhere | ☐ |
 | 20 | Operators trained; administrator password handed over securely | ☐ |
+| 21 | `php bin/check.php` shows upload limits ≥ 10M/12M, and Tesseract or the Anthropic key works (*Read the sample* on a real invoice) | ☐ |
+| 22 | Ten real invoices read; every field compared with the picture; units and totals correct or corrected | ☐ |
+| 23 | A purchase invoice for a weighed truck matches automatically; quantity difference within tolerance shows MATCHED | ☐ |
+| 24 | A wrong quantity, a wrong vehicle and an unweighed truck each raise the expected exception; resolving with a note clears it | ☐ |
+| 25 | A material return matches an OUTWARD ticket and its original invoice; over-return is caught | ☐ |
+| 26 | A verified document reaches SAP (and/or the Oracle tables) in the test system with the right values; a held document is not sent until released | ☐ |
 
 ## Appendix E — Main database tables (SQLite)
 
-`weighments` (tickets), `gate_entries` (gate passes), `vehicles`, `parties`, `materials`, `scales`, `live_scale` (current readings), `gates`, `gate_state`, `gate_events`, `users`, `settings`, `audit`, `login_attempts`. The file is `data/weighbridge.sqlite`; it can be opened read-only with any SQLite tool for your own reports. Please do not edit it while the system is running.
+`weighments` (tickets), `gate_entries` (gate passes), `documents`, `document_lines`, `document_tickets` (links to tickets), `doc_exceptions`, `po_lines` (PO list), `vehicles`, `parties`, `materials`, `scales`, `live_scale` (current readings), `gates`, `gate_state`, `gate_events`, `users`, `settings`, `audit`, `login_attempts`. The file is `data/weighbridge.sqlite`; it can be opened read-only with any SQLite tool for your own reports. Please do not edit it while the system is running.
 
 ## Appendix F — Glossary
 
@@ -758,10 +983,130 @@ These are only **examples of the kind of line** indicators send. Always check yo
 | **Stable** | Weight is steady (no motion), safe to record. |
 | **ANPR** | Automatic number-plate recognition. |
 | **Boom barrier** | The gate arm at the entry, exit or weighbridge. |
+| **OCR** | Optical character recognition – turning a picture of text into data. |
+| **PO** | Purchase order. A purchase invoice should refer to one. |
+| **Exception** | A difference between a document and the weighbridge (or the PO) that a person must look at. |
+| **Verified** | A person has checked the document against the picture and locked it. |
 | **Pulse** | A short contact closure, like pressing a remote-control button. |
 | **Reader / supervisor** | Background programs that read a scale / that keep all readers running. |
 | **Store-and-forward** | Records are kept locally and sent when the destination is available. |
 
+## Appendix G — Data sent to SAP (JSON contract)
+
+One HTTP `POST` per document, `Content-Type: application/json`. Fields that are not known are `null`. The example is a real document from the test system.
+
+```json
+{
+    "documentNo": "DOC202609290001",
+    "documentType": "PO_INVOICE",
+    "invoiceNo": "BM/2026-27/0451",
+    "invoiceDate": "2026-09-15",
+    "supplier": "SHREE BALAJI MINERALS PVT LTD",
+    "supplierTaxId": "27AABCS1234F1Z5",
+    "buyer": "Sunrise Steel Pvt Ltd",
+    "poNo": "4500012345",
+    "referenceNo": null,
+    "originalInvoiceNo": null,
+    "vehicleNo": "MH31AB1234",
+    "ewayBillNo": "481234567890",
+    "currency": "INR",
+    "subtotal": 139650,
+    "taxAmount": 25137,
+    "totalAmount": 164787,
+    "lines": [
+        {
+            "lineNo": 1,
+            "materialCode": null,
+            "description": "Iron Ore Fines 62% Fe",
+            "hsn": "2601",
+            "quantity": 28.5,
+            "uom": "MT",
+            "rate": 4850,
+            "amount": 138225,
+            "quantityKg": 28500
+        },
+        {
+            "lineNo": 2,
+            "materialCode": null,
+            "description": "Loading and Handling Charges",
+            "hsn": "9967",
+            "quantity": 28.5,
+            "uom": "MT",
+            "rate": 50,
+            "amount": 1425,
+            "quantityKg": 28500
+        }
+    ],
+    "weighbridge": {
+        "ticketNos": [
+            "202609150001"
+        ],
+        "netKg": 28450,
+        "tickets": [
+            {
+                "ticket_no": "202609150001",
+                "vehicle_no": "MH31AB1234",
+                "direction": "INWARD",
+                "net_kg": 28450,
+                "status": "CLOSED"
+            }
+        ]
+    },
+    "matchStatus": "MATCHED",
+    "exceptions": [],
+    "verifiedBy": "admin",
+    "verifiedAt": "2026-09-29 14:21:22"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `documentNo` | Unique number of the document in this system – use it as an idempotency key (the same document may be posted again with changes) |
+| `documentType` | `PO_INVOICE` or `MATERIAL_RETURN` |
+| `invoiceNo`, `invoiceDate` | As verified (date `YYYY-MM-DD`) |
+| `poNo`, `referenceNo`, `originalInvoiceNo` | PO number (invoices); return reference and original invoice (returns) |
+| `lines[]` | `lineNo, materialCode, description, hsn, quantity, uom, rate, amount, quantityKg` (`quantityKg` only for weight units) |
+| `weighbridge` | Linked tickets and their total net weight in kg |
+| `matchStatus` | `MATCHED`, `REVIEW`, `EXCEPTION`, `UNMATCHED` |
+| `exceptions[]` | `code, severity, message, status` (`OPEN`, `RESOLVED`, `WAIVED`) and the reviewer's `note` |
+| `verifiedBy`, `verifiedAt` | Who locked the document, and when |
+
+Any 2xx answer means "accepted". If the answer is JSON, the SAP document number is read from the path configured in Setup (for example `d.MaterialDocument`), or else from `documentNo`, `DocumentNumber`, `MaterialDocument`, `id` or `ref` if present. A non-2xx answer marks the document FAILED with the message SAP returned (for OData errors `error.message.value`), and it is retried.
+
+**Optional PO lookup (SAP → program).** A `GET` to the configured URL with `{po}` replaced by the PO number. Accepted answers: `{"po_no":"…","vendor":"…","lines":[{"line_no":10,"material_code":"…","description":"…","qty":40,"uom":"MT","rate":1200}]}`, or the standard OData shapes (`d.to_PurchaseOrderItem.results[]`, or OData v4 `value[]` with `_PurchaseOrderItem`) using the fields `PurchaseOrder, Supplier, PurchaseOrderItem, Material, PurchaseOrderItemText, OrderQuantity, PurchaseOrderQuantityUnit, NetPriceAmount`. HTTP 404 means "PO not found".
+
+## Appendix H — Exception catalogue
+
+| Code | Sev. | Meaning | What to do |
+|---|:-:|---|---|
+| `NO_TICKET` | HIGH | No weighbridge ticket found for the document | Was the truck weighed? Check vehicle number and date; link a ticket by hand; or resolve/waive with a note (weighed elsewhere) |
+| `QTY_MISMATCH` | HIGH | Invoice quantity differs from the weighbridge net weight beyond the tolerance | Check unit and quantity on the picture; talk to the supplier; resolve with the agreed outcome |
+| `VEHICLE_MISMATCH` | HIGH / WARN | Vehicle on the document differs from the ticket (WARN when only one character differs) | Correct a misread number, or find out which truck it was |
+| `DIRECTION_MISMATCH` | HIGH | Purchase invoice linked to an OUTWARD ticket, or a return to an INWARD ticket | Unlink and link the right ticket |
+| `TICKET_CANCELLED` | HIGH | The linked ticket was cancelled | Link the correct ticket |
+| `TICKET_MULTI_DOC` | HIGH | The same ticket is linked to two documents (possible double billing) | Decide which document owns the ticket; unlink the other |
+| `DUPLICATE_INVOICE` | HIGH | Same invoice number from the same supplier was uploaded before | Cancel the duplicate (administrator) or resolve with a note |
+| `PO_MISSING` | HIGH | Purchase invoice without a PO number | Enter the PO number from the picture / ask the supplier |
+| `PO_UNKNOWN` | HIGH | PO not in the PO list / SAP | Import the PO list; check the number |
+| `PO_VENDOR_MISMATCH` | HIGH | Supplier is not the vendor of the PO | Check the supplier name; wrong PO? |
+| `PO_OVER_QTY` | HIGH | Total invoiced on a PO line exceeds the ordered quantity | Check other invoices on the same PO; get a PO amendment |
+| `RETURN_OVER_QTY` | HIGH | Returned quantity (all returns together) exceeds the quantity invoiced | Check the return quantities |
+| `PARTY_MISMATCH` | WARN | Supplier differs from the party on the ticket | Correct the party name on either side |
+| `MATERIAL_MISMATCH` | WARN | Ticket material does not resemble any invoice line | Check the material |
+| `DATE_MISMATCH` | WARN | Ticket date is further from the document date than the date window | Check the dates |
+| `TICKET_OPEN` | WARN | Linked ticket has no second weighment yet | Complete the ticket |
+| `UOM_MISSING` | WARN | A line with a quantity has no unit (a suggestion is shown) | Choose the unit |
+| `NO_INVOICE_NO`, `NO_SUPPLIER`, `NO_DATE`, `NO_LINES` | WARN | Basic details missing | Fill them in |
+| `PO_LINE_UNKNOWN` | WARN | An invoiced item is not on the PO | Check the item / PO |
+| `PO_RATE_MISMATCH` | WARN | Rate differs from the PO rate by more than 1 % | Check the rate |
+| `RETURN_NO_REF` | WARN | The return does not name an original invoice | Enter it |
+| `RETURN_ORIG_UNKNOWN` | WARN | The original invoice is not among the uploaded documents | Upload it |
+| `RETURN_SUPPLIER_MISMATCH` | WARN | Return is to a different supplier than the invoice | Check |
+| `RETURN_LINE_UNKNOWN` | WARN | Returned item is not on the original invoice | Check |
+| `NO_DOCUMENT` | WARN | An inward ticket has no invoice document (listed on the Exceptions screen) | Upload the invoice or link the ticket |
+| `QTY_UNCHECKED` | INFO | Quantity could not be compared (units are pieces, litres…) | None |
+| `PO_NOT_CHECKED` | INFO | No PO list / SAP lookup available | Load the PO list if you want PO checks |
+
 ---
 
-*End of manual — Weighbridge Management System v1.0.0*
+*End of manual — Weighbridge Management System v1.1.0*

@@ -10,6 +10,10 @@ foreach ($argv as $a) { if (preg_match('/^--loop=(\d+)$/', $a, $m)) { $loop = ma
 do {
     Settings::reset();
     $r = OracleSync::syncPending();
-    echo sprintf("[%s] synced=%d failed=%d%s\n", date('c'), $r['ok'], $r['failed'], $r['error'] ? ' error=' . $r['error'] : '');
+    echo sprintf("[%s] tickets synced=%d failed=%d%s\n", date('c'), $r['ok'], $r['failed'], $r['error'] ? ' error=' . $r['error'] : '');
+    try {
+        $d = DocSync::syncPending();
+        if ($d['sent'] || $d['failed'] || $d['held']) { echo sprintf("[%s] documents sent=%d failed=%d held=%d%s\n", date('c'), $d['sent'], $d['failed'], $d['held'], $d['error'] ? ' error=' . $d['error'] : ''); }
+    } catch (Throwable $e) { echo '[' . date('c') . '] documents error=' . $e->getMessage() . "\n"; }
     if ($loop) { sleep($loop); }
 } while ($loop);

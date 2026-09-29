@@ -21,6 +21,14 @@ foreach (['pdo_sqlite' => 'database', 'sodium' => 'password/secret encryption', 
     extension_loaded($e) ? ok("extension $e") : fail("extension $e", "missing ($why) - enable it in php.ini");
 }
 function_exists('curl_init') ? ok('extension curl') : warn('extension curl', 'missing - needed for camera snapshots, plate recognition and HTTP gate relays');
+$bytes = function (string $v): int { $v = trim($v); $n = (int)$v; return match (strtolower(substr($v, -1))) { 'g' => $n * 1073741824, 'm' => $n * 1048576, 'k' => $n * 1024, default => $n }; };
+if ($bytes((string)ini_get('upload_max_filesize')) < 8 * 1048576 || $bytes((string)ini_get('post_max_size')) < 10 * 1048576) {
+    warn('php.ini upload limits', 'upload_max_filesize=' . ini_get('upload_max_filesize') . ', post_max_size=' . ini_get('post_max_size') . ' - phone photos of invoices need at least 10M / 12M (set both in php.ini)');
+} else { ok('php.ini upload limits', 'upload_max_filesize=' . ini_get('upload_max_filesize') . ', post_max_size=' . ini_get('post_max_size')); }
+extension_loaded('gd') ? ok('extension gd', 'invoice pictures are rotated / resized before reading') : warn('extension gd', 'missing - invoice pictures are used as they are (enable php-gd for best OCR results)');
+function_exists('exif_read_data') ? ok('extension exif') : warn('extension exif', 'missing - phone photos taken sideways are not turned upright automatically');
+$tess = trim((string)@shell_exec(PHP_OS_FAMILY === 'Windows' ? 'where tesseract 2>NUL' : 'command -v tesseract 2>/dev/null'));
+$tess !== '' ? ok('Tesseract OCR', strtok($tess, "\r\n")) : warn('Tesseract OCR', 'not installed - only needed for offline invoice reading (the Claude provider does not need it)');
 $oci = function_exists('oci_connect') ? 'oci8' : (extension_loaded('pdo_oci') ? 'pdo_oci' : '');
 $oci !== '' ? ok('Oracle driver', $oci) : warn('Oracle driver', 'not installed - only needed for the Oracle transfer (README step 6)');
 
