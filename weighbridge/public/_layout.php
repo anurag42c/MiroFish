@@ -4,7 +4,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 Auth::start();
 header('X-Frame-Options: SAMEORIGIN'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: same-origin');
 header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'self'");
-if (is_installed() && Settings::get('schema') !== '5') { Db::upgrade(); Settings::set('schema', '5'); }
+if (is_installed() && Settings::get('schema') !== '6') { Db::upgrade(); Settings::set('schema', '6'); }
 if (!is_installed() && basename($_SERVER['SCRIPT_NAME']) !== 'install.php') { redirect('install.php'); }
 
 function page_head(string $title, bool $admin = false): void

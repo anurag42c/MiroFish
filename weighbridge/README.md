@@ -30,6 +30,8 @@ A complete truck weighbridge system in plain PHP 8.1+ (no framework, no Composer
 | `bin/scale_supervisor.php` | **The service to run**: starts/restarts one reader per enabled scale, and performs gate auto-close |
 | `bin/scale_daemon.php` | Reader for one scale (`--scale=ID`), started by the supervisor |
 | `bin/sync_oracle.php` | Oracle push service (`--loop=30`) |
+| `bin/sync_odoo.php` | Odoo push + purchase-order/master pull service (`--loop=30`) |
+| `odoo/wb_weighbridge/` | Odoo 17 addon (model `wb.ticket`, views, pull job) - see `odoo/README.md` |
 | `sql/oracle_schema.sql` | Oracle table DDL |
 | `bin/backup.php` | Online SQLite backup with integrity check |
 | `tests/run.php` | Automated tests |
@@ -197,6 +199,15 @@ Plate comparison ignores spaces/dashes and OCR look-alikes (0/O, 1/I, 5/S, 8/B, 
 4. **Targets**: Oracle - run the `WB_DOCUMENTS` part of `sql/oracle_schema.sql`; SAP - give your SAP team the JSON contract (manual Appendix G) and enter their endpoint, login and (for Gateway services) tick the CSRF handshake. The background `bin/sync_oracle.php --loop=30` service sends documents too.
 5. **Use**: Documents → Upload → check against the picture (yellow = missing/unit) → *Save & Verify* → look at the match panel and *Exceptions*. Exceptions need a note to resolve; only an administrator can waive. Documents with open HIGH exceptions are held until released (policy setting).
 6. **Matching rules** (defaults): ±5 days, 2 % quantity tolerance, weighed-but-no-invoice after 24 h.
+
+## Step 8g – Odoo and REST API (optional)
+
+The program always keeps its own local SQLite database; Odoo is an add-on connection.
+
+1. **Odoo side**: copy `odoo/wb_weighbridge` into the addons path, update the apps list, install **Weighbridge** (Odoo 17). Create an API key for a user in the *Weighbridge / Manager* group (Preferences → Account Security).
+2. **Weighbridge side** (Setup → *Odoo & API*): URL, database, login, API key → *Test Odoo connection* → tick *Send completed tickets to Odoo* → Save. Optionally tick the PO / master pulls.
+3. Run the sender: `php bin/sync_odoo.php --loop=30` (systemd unit `deploy/weighbridge-odoo-sync.service`, or the NSSM lines in `deploy/windows-install.bat`).
+4. **REST API** for any other system: Setup → *Odoo & API* → *Generate new token*; `GET /api/v1/tickets.php`, `documents.php`, `purchase_orders.php`, `masters.php`, `ping.php`; writes (POST purchase orders / masters) only after ticking *Allow API writes*. Spec: `/api/v1/openapi.php`. Details: manual chapter 17.
 
 ## Step 9 – Daily use
 

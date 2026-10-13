@@ -167,9 +167,10 @@ final class Weighment
         if ($w['first_type'] === 'GROSS') { $gross = $first; $tare = $kg; } else { $gross = $kg; $tare = $first; }
         if ($gross <= $tare) { throw new RuntimeException(sprintf('Gross (%.0f kg) must be greater than tare (%.0f kg). Check first-weight type.', $gross, $tare)); }
         $sync = Settings::get('ora_enabled') === '1' ? 'PENDING' : 'NA';
-        Db::q("UPDATE weighments SET second_kg=?, second_at=?, second_manual=?, gross_kg=?, tare_kg=?, net_kg=?, status='CLOSED', sync_status=?,
+        $odoo = Settings::get('odoo_enabled') === '1' ? 'PENDING' : 'NA';
+        Db::q("UPDATE weighments SET second_kg=?, second_at=?, second_manual=?, gross_kg=?, tare_kg=?, net_kg=?, status='CLOSED', sync_status=?, odoo_status=?,
                remarks = CASE WHEN ? IS NULL THEN remarks ELSE TRIM(COALESCE(remarks,'') || ' [' || ? || ']') END WHERE id=?",
-            [$kg, $now, $manual, $gross, $tare, $gross - $tare, $sync, $note, $note, $id]);
+            [$kg, $now, $manual, $gross, $tare, $gross - $tare, $sync, $odoo, $note, $note, $id]);
         if ($w['first_type'] === 'TARE' || $note === null) {   // learn the vehicle's tare for next time
             Db::q('UPDATE vehicles SET tare_kg = ? WHERE reg_no = ? AND (tare_kg IS NULL)', [$tare, $w['vehicle_no']]);
         }
@@ -180,6 +181,7 @@ final class Weighment
         // A ticket already in Oracle must be re-sent so Oracle also shows it as CANCELLED.
         Db::q("UPDATE weighments SET remarks=TRIM(COALESCE(remarks,'') || ' [CANCELLED: ' || ? || ']'),
                sync_status = CASE WHEN sync_status IN ('SYNCED','PENDING','FAILED') AND gross_kg IS NOT NULL THEN 'PENDING' ELSE 'NA' END,
+               odoo_status = CASE WHEN odoo_status IN ('SYNCED','PENDING','FAILED') AND gross_kg IS NOT NULL THEN 'PENDING' ELSE 'NA' END,
                status='CANCELLED' WHERE id=? AND status<>'CANCELLED'", [$reason, $id]);
         Db::audit('ticket_cancel', "$id $reason");
     }

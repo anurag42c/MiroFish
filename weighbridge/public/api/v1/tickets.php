@@ -1,17 +1,24 @@
 <?php
 /**
- * Read-only REST API for ERP integration.
- *   GET /api/v1/tickets.php?since_id=0&limit=100        Authorization: Bearer <token>
- * Token is created in Setup > General (stored only as a hash).
+ * Read-only REST API for ERP integration (Odoo, SAP, Oracle jobs ...). Authorization: Bearer <token> (Setup > General).
+ *   GET tickets.php?since_id=0&limit=100              closed/cancelled tickets, ascending id (use the last id as the next since_id)
+ *   GET tickets.php?ticket_no=WB000123                one ticket (any status)
+ *   GET tickets.php?from=2026-09-01&to=2026-09-30&status=CLOSED&vehicle=MH31&party=Balaji&material=Iron   filters (dates are first-weight dates)
  */
 require_once __DIR__ . '/../../../src/bootstrap.php';
-header('Content-Type: application/json'); header('Cache-Control: no-store');
-$hash = Settings::get('api_token_hash');
-$auth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
-if ($hash === '' || !preg_match('/^Bearer\s+(\S+)$/', $auth, $m) || !hash_equals((string)$hash, hash('sha256', $m[1]))) {
-    http_response_code(401); exit('{"error":"unauthorized"}');
+Api::begin();
+if (isset($_GET['ticket_no'])) {
+    $w = Db::one('SELECT * FROM weighments WHERE ticket_no = ?', [trim((string)$_GET['ticket_no'])]);
+    $w ? Api::out(['ticket' => Api::ticket($w)]) : Api::err(404, 'ticket not found');
 }
-$since = max(0, (int)($_GET['since_id'] ?? 0)); $limit = max(1, min(500, (int)($_GET['limit'] ?? 100)));
-$rows = Db::all("SELECT id, ticket_no, vehicle_no, party, material, direction, driver, challan_no, gross_kg, tare_kg, net_kg,
-                 first_at, second_at, status, operator FROM weighments WHERE id > ? AND status IN ('CLOSED','CANCELLED') ORDER BY id LIMIT ?", [$since, $limit]);
-echo json_encode(['count' => count($rows), 'tickets' => $rows], JSON_UNESCAPED_UNICODE);
+$where = ["status IN ('CLOSED','CANCELLED')"]; $args = [];
+$since = max(0, (int)($_GET['since_id'] ?? 0)); $where[] = 'id > ?'; $args[] = $since;
+if (in_array($_GET['status'] ?? '', ['CLOSED', 'CANCELLED'], true)) { $where[] = 'status = ?'; $args[] = $_GET['status']; }
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['from'] ?? ''))) { $where[] = 'substr(first_at,1,10) >= ?'; $args[] = $_GET['from']; }
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['to'] ?? ''))) { $where[] = 'substr(first_at,1,10) <= ?'; $args[] = $_GET['to']; }
+foreach (['vehicle' => 'vehicle_no', 'party' => 'party', 'material' => 'material'] as $q => $col) {
+    if (($_GET[$q] ?? '') !== '') { $where[] = "$col LIKE ? ESCAPE '\\'"; $args[] = '%' . addcslashes((string)$_GET[$q], '%_\\') . '%'; }
+}
+$args[] = Api::limit();
+$rows = Db::all('SELECT * FROM weighments WHERE ' . implode(' AND ', $where) . ' ORDER BY id LIMIT ?', $args);
+Api::out(['count' => count($rows), 'next_since_id' => $rows ? (int)end($rows)['id'] : $since, 'tickets' => array_map([Api::class, 'ticket'], $rows)]);

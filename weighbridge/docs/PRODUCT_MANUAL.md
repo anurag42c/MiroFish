@@ -1,6 +1,6 @@
 # Weighbridge Management System — Product Manual
 
-**Version 1.1.0** &nbsp;·&nbsp; Truck weighing, gate entry, plate recognition, invoice OCR with weighbridge matching, and SAP / Oracle integration
+**Version 1.2.0** &nbsp;·&nbsp; Truck weighing, gate entry, plate recognition, invoice OCR with weighbridge matching, and SAP / Oracle integration
 
 | | |
 |---|---|
@@ -29,7 +29,8 @@
 14. Administration
 15. Security
 16. Troubleshooting
-17. Appendices (settings, database, formats, checklists, SAP data contract, exception catalogue, glossary)
+17. Odoo integration and the REST API
+18. Appendices (settings, database, formats, checklists, SAP data contract, exception catalogue, glossary)
 
 ---
 
@@ -574,16 +575,16 @@ Press **OPEN** or **CLOSE** on the gate's card. The result appears under the but
 
 Vehicles (registration, **stored tare**, transporter, blocked flag), parties and materials. Add anyone; administrators can delete and block.
 
-## 12.3 ERP interface (read-only REST API)
+## 12.3 ERP interface (REST API)
 
-*Setup → General → ERP REST API → Generate new token* (the token is shown **once**; store it safely; it is kept only as a hash). Your ERP then calls:
+*Setup → Odoo & API → REST API → Generate new token* (the token is shown **once**; store it safely; it is kept only as a hash). Your ERP then calls:
 
 ```
 GET http://<server>/api/v1/tickets.php?since_id=0&limit=100
 Authorization: Bearer <token>
 ```
 
-It returns completed and cancelled tickets with `id` greater than `since_id` (maximum 500 per call) as JSON. The ERP remembers the highest `id` received and asks for newer ones next time. *Disable API* revokes access.
+(The token is now generated under *Setup → Odoo & API*.) It returns completed and cancelled tickets with `id` greater than `since_id` (maximum 500 per call) as JSON. The ERP remembers the highest `id` received and asks for newer ones next time. *Disable API* revokes access. Documents, purchase orders and master data are also available – and, if you allow it, writable – see **chapter 17**, which also describes the direct connection to **Odoo**.
 
 ---
 
@@ -854,7 +855,70 @@ First run `php bin/check.php` and look at *Setup → Diagnostics*.
 
 ---
 
-# 17. Appendices
+# 17. Odoo integration and the REST API
+
+The program keeps its **own local SQLite database** and works fully without any ERP. Odoo (or any other system) is connected in two independent ways; use either or both.
+
+| Way | Direction | Use when |
+|---|---|---|
+| **A. Push to Odoo** (Setup → *Odoo & API* → *Odoo connection*) | Weighbridge → Odoo. Every completed or cancelled ticket is written to the Odoo model `wb.ticket`. Optionally the program also **fetches confirmed purchase orders, vendors/customers and products** from Odoo. | Odoo is in the cloud (Odoo.sh / Online) or anywhere the weighbridge PC can reach but Odoo cannot reach the PC. **Recommended.** |
+| **B. REST API** (`/api/v1/…`) | Any system → Weighbridge. Read tickets and documents; write purchase orders and master data. | Odoo (or another system) can reach the weighbridge server, or you build your own integration. The Odoo addon includes a ready *pull* job for this. |
+
+Both are *store-and-forward*: if Odoo is switched off or the network is down, tickets stay **PENDING** in the local database and are delivered automatically when it returns. Sending the same ticket again updates the same Odoo record (matched on ticket number) – no duplicates. Weighing never waits for Odoo.
+
+## 17.1 Install the Odoo addon
+
+1. Copy the folder `odoo/wb_weighbridge` into your Odoo **addons path** (on Odoo.sh: into your repository; on Odoo Online custom addons are not possible – use way B with a consultant, or Odoo.sh).
+2. Restart Odoo, switch on *Developer mode*, *Apps → Update Apps List*, search **Weighbridge**, *Install*. The addon is written for **Odoo 17** (it depends on `base`, `mail`, `product`, `purchase`). For Odoo 16 or 18 your Odoo partner may need to make small changes to the view tags (`tree`/`list`) and the cron definition.
+3. A new menu **Weighbridge → Tickets** appears (list, form, pivot; filters for inward, outward, cancelled, *no purchase order*, plate mismatch). Two groups are created: *Weighbridge / User* (read) and *Weighbridge / Manager* (full); the administrator is a manager.
+4. The addon links each ticket to a **partner**, **product** and **purchase order** when the typed name or PO number matches **exactly one** Odoo record; otherwise leave it for a person to choose – a manual choice is never overwritten.
+
+## 17.2 Connect the weighbridge to Odoo (push)
+
+1. In Odoo create a technical user (or use an existing one) with the *Weighbridge / Manager* group and create an **API key**: *Preferences → Account Security → New API Key*.
+2. In the program: *Setup → Odoo & API*. Enter **Odoo URL** (for example `https://mycompany.odoo.com`), **Database**, **Login** and the **API key**. Leave *Odoo model* as `wb.ticket`.
+3. Press **Test Odoo connection**. It must say *Connected OK (Odoo 17.0, user id …). Model wb.ticket has N record(s).* If it says the model is not usable, the addon is not installed in that database.
+4. Tick **Send completed tickets to Odoo automatically** and **Save**. From now on every ticket you close is queued.
+5. Start the sender: *Windows* – the commented lines at the end of `deploy\windows-install.bat` (NSSM service `WeighbridgeOdooSync`); *Linux* – `deploy/weighbridge-odoo-sync.service` (systemd), or cron `* * * * * php /var/www/weighbridge/bin/sync_odoo.php`. **Send pending now** in Setup does the same once by hand.
+6. Optional: tick *fetch confirmed purchase orders* and/or *fetch vendors/customers and products*. The sender then imports every confirmed purchase order line (Odoo `purchase.order.line`) into the PO list used by the invoice checks (chapter 13) and adds new vendor / product names to the drop-down lists. Press **Fetch POs / masters now** to try it. Nothing is deleted from the local lists.
+
+Times are converted from the PC's local time to UTC (as Odoo stores them). Check the time zone of the PC.
+
+**What is written to `wb.ticket`:** ticket_no, state (CLOSED / CANCELLED), direction, vehicle_no, driver, challan_no, party_name, material_name, gross_kg, tare_kg, net_kg, first_weight_at, second_weight_at, operator, scale_name, plate_in, plate_out, plate_flag, remarks, local_id.
+
+**Monitoring.** *Reports* shows the status per ticket; *Setup → Diagnostics* shows the number of pending/failed Odoo tickets; a failed ticket shows Odoo's own error message and is retried automatically.
+
+## 17.3 The REST API
+
+Switch it on with *Setup → Odoo & API → REST API → Generate new token* (shown **once**, stored only as a hash). Every request carries the header `Authorization: Bearer <token>`; always use **HTTPS** outside the plant LAN. Reading is always possible with a valid token; **writing** needs the extra switch *Allow API writes*. After 20 wrong tokens from one address the API locks for 5 minutes. A machine-readable description (OpenAPI 3) is at `/api/v1/openapi.php` (no token needed – it contains no data); import it into Postman or Swagger.
+
+| Endpoint | Method | What it does |
+|---|---|---|
+| `ping.php` | GET | Checks the token; shows version and whether writes are enabled |
+| `tickets.php?since_id=N&limit=L` | GET | Completed and cancelled tickets with id > N (max 500). The answer carries `next_since_id` – use it as the next `since_id`. Filters: `status`, `from`, `to` (dates), `vehicle`, `party`, `material`. `ticket_no=…` returns one ticket of any status. |
+| `documents.php` | GET | Invoice / return documents with match status and exception counts (filters `since_id`, `status`, `match`, `type`); `doc_no=…` returns one document in full – the same JSON that is sent to SAP (Appendix G) including lines, linked tickets and exceptions |
+| `purchase_orders.php?po=…` | GET | Lines of one purchase order |
+| `purchase_orders.php` | POST | `{"pos":[{"po_no":"P00012","vendor":"ABC","po_date":"2026-09-01","lines":[{"line_no":10,"material_code":"IRON","description":"Iron ore","qty":40,"uom":"MT","rate":1200}]}]}` – replaces all lines of each PO sent (up to 500 POs). If one entry is invalid **nothing** is stored (HTTP 422 with the reason). |
+| `masters.php?type=parties\|materials\|vehicles` | GET | The lists the operator picks from |
+| `masters.php` | POST | `{"type":"parties","items":[{"name":"ABC Traders","active":true}]}` or `{"type":"vehicles","items":[{"reg_no":"MH31AB1234","tare_kg":9000,"transporter":"XYZ","blocked":false}]}` – upsert; all-or-nothing |
+
+Answers are JSON. Errors: `{"error":"…"}` with HTTP 400 (bad request), 401 (token), 403 (writes off), 404, 405 (wrong method), 413, 422 (validation), 429 (locked).
+
+Example:
+
+```
+curl -H "Authorization: Bearer $TOKEN" "https://wb.example.com/api/v1/tickets.php?since_id=0&limit=100"
+```
+
+## 17.4 Pull mode (Odoo reads the weighbridge)
+
+If Odoo can reach the weighbridge server: in Odoo set the *System Parameters* `wb.api_url` (for example `https://wb.example.com/api/v1`) and `wb.api_token` (and `wb.api_tz` if the PC is not on `Asia/Kolkata`), then activate the scheduled action **Weighbridge: fetch new tickets** (every 5 minutes), or run *Weighbridge → Fetch now*. The job remembers the last id (`wb.last_id`) and creates or updates `wb.ticket` records by ticket number, so it can run together with the push without duplicates.
+
+## 17.5 What has and has not been tested
+
+The push client, the PO and master pulls, store-and-forward and the whole REST API are covered by the automated tests against a **simulated Odoo JSON-RPC server** and a running copy of the API (about 65 checks). The Odoo addon was checked for syntax only; it has **not been installed in a live Odoo** here. Install it on an Odoo test database first, run *Test Odoo connection*, close one ticket on a test weighbridge and confirm the record appears, before using it for real. Receiving goods or creating invoices in Odoo from a ticket is not automatic – the tickets are linked to purchase orders so that your Odoo team can build the receipt / bill process they want on top.
+
+# 18. Appendices
 
 ## Appendix A — Settings reference
 
@@ -883,6 +947,9 @@ First run `php bin/check.php` and look at *Setup → Diagnostics*.
 | Send documents to / hold policy | Documents & OCR | nowhere / hold if HIGH exceptions |
 | Oracle document tables | Documents & OCR | `WB_DOCUMENTS`, `WB_DOCUMENT_LINES` |
 | SAP endpoint, login, client, CSRF, reference path, PO lookup, timeout | Documents & OCR | empty; basic; —; on; —; —; 15 s |
+| Odoo on/off, URL, database, login, API key, model, timeout, batch | Odoo & API | off; —; —; —; —; `wb.ticket`; 20 s; 50 |
+| Fetch Odoo purchase orders / vendors & products | Odoo & API | off / off |
+| REST API token / allow API writes | Odoo & API | none / off |
 
 ## Appendix B — Oracle table `WEIGHBRIDGE_TICKETS`
 
@@ -967,10 +1034,13 @@ These are only **examples of the kind of line** indicators send. Always check yo
 | 24 | A wrong quantity, a wrong vehicle and an unweighed truck each raise the expected exception; resolving with a note clears it | ☐ |
 | 25 | A material return matches an OUTWARD ticket and its original invoice; over-return is caught | ☐ |
 | 26 | A verified document reaches SAP (and/or the Oracle tables) in the test system with the right values; a held document is not sent until released | ☐ |
+| 27 | Odoo (if used): addon installed on a test database; *Test Odoo connection* says Connected OK; a closed ticket appears in *Weighbridge → Tickets* with the right weights and times | ☐ |
+| 28 | Odoo switched off for a while: weighing continues, tickets show PENDING/FAILED and arrive after it returns, without duplicates; a cancelled ticket updates the same record | ☐ |
+| 29 | REST API: token generated, `ping.php` answers, a wrong token is refused, `tickets.php` returns the new ticket; writes stay refused until *Allow API writes* is ticked | ☐ |
 
 ## Appendix E — Main database tables (SQLite)
 
-`weighments` (tickets), `gate_entries` (gate passes), `documents`, `document_lines`, `document_tickets` (links to tickets), `doc_exceptions`, `po_lines` (PO list), `vehicles`, `parties`, `materials`, `scales`, `live_scale` (current readings), `gates`, `gate_state`, `gate_events`, `users`, `settings`, `audit`, `login_attempts`. The file is `data/weighbridge.sqlite`; it can be opened read-only with any SQLite tool for your own reports. Please do not edit it while the system is running.
+`weighments` (tickets), `gate_entries` (gate passes), `documents`, `document_lines`, `document_tickets` (links to tickets), `doc_exceptions`, `po_lines` (PO list), `vehicles`, `parties`, `materials`, `scales`, `live_scale` (current readings), `gates`, `gate_state`, `gate_events`, `users`, `settings`, `audit`, `login_attempts`. Tickets carry `odoo_status`, `odoo_id`, `odoo_at`, `odoo_error` (state of the Odoo transfer). The file is `data/weighbridge.sqlite`; it can be opened read-only with any SQLite tool for your own reports. Please do not edit it while the system is running.
 
 ## Appendix F — Glossary
 

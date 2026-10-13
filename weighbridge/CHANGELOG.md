@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+- **Odoo integration**: closed/cancelled tickets are pushed to Odoo (`wb.ticket`) over the standard JSON-RPC external API with store-and-forward and create-or-update by ticket number; optional pull of confirmed purchase orders (into the PO list used by the invoice checks) and of vendors/customers and products (into the drop-down lists). New setup tab *Odoo & API*, service `bin/sync_odoo.php` (systemd unit + NSSM lines).
+- **Odoo addon** `odoo/wb_weighbridge` (Odoo 17): ticket list/form/pivot/search, partner/product/purchase-order linking, access groups, and a pull job (off by default) for when Odoo can reach the weighbridge.
+- **REST API v1** extended: `tickets` (filters, by ticket_no, cursor), `documents` (list + full document), `purchase_orders` (read, write), `masters` (read, write), `ping`, public OpenAPI description (`openapi.php`); writes need an explicit switch; failed-token lockout; all-or-nothing validation.
+- SQLite schema 6 (`odoo_*` columns on tickets); data stays in the local SQLite database.
+- About 65 new automated checks (simulated Odoo JSON-RPC server, live API); manual chapter 17 and checklist items 27-29.
+
 ## 1.1.0
 - **Invoice / material-return documents**: upload a picture or PDF, tag it PO invoice or material return, read it with Claude vision (structured JSON output) or offline Tesseract (rule-based reader), review beside the picture, verify.
 - **Matching with the weighbridge**: automatic ticket linking (vehicle, challan no., supplier, material, weight, date), split loads, manual link/unlink, goods-vs-service line handling, quantity check with tolerance, unit suggestion.

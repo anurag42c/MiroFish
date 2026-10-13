@@ -47,11 +47,15 @@ final class Settings
         'ora_doc_table' => 'WB_DOCUMENTS', 'ora_doc_line_table' => 'WB_DOCUMENT_LINES',
         'sap_url' => '', 'sap_auth' => 'basic', 'sap_user' => '', 'sap_pass' => '', 'sap_token' => '', 'sap_client' => '',
         'sap_csrf' => '1', 'sap_ref_path' => '', 'sap_po_url' => '', 'sap_timeout' => '15',
+        // Odoo (JSON-RPC push of tickets, pull of purchase orders / masters) and REST API write access
+        'odoo_enabled' => '0', 'odoo_url' => '', 'odoo_db' => '', 'odoo_user' => '', 'odoo_key' => '', 'odoo_model' => 'wb.ticket',
+        'odoo_timeout' => '20', 'odoo_pull_po' => '0', 'odoo_pull_masters' => '0', 'odoo_batch' => '50',
+        'api_write' => '0',
         // oracle
         'ora_enabled' => '0', 'ora_host' => '', 'ora_port' => '1521', 'ora_service' => '',
         'ora_user' => '', 'ora_pass' => '', 'ora_table' => 'WEIGHBRIDGE_TICKETS', 'ora_batch' => '50',
     ];
-    public const SECRETS = ['ora_pass', 'cam_pass', 'anpr_key', 'ocr_claude_key', 'sap_pass', 'sap_token'];
+    public const SECRETS = ['ora_pass', 'cam_pass', 'anpr_key', 'ocr_claude_key', 'sap_pass', 'sap_token', 'odoo_key'];
 
     private static ?array $cache = null;
     private static array $over = [];        // unsaved values used by the Setup "Test" buttons

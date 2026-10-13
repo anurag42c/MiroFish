@@ -104,6 +104,14 @@ try {
             if ($r['error']) { out(false, $r['error']); }
             out($r['plate'] !== null, $r['plate'] !== null ? "Plate: {$r['plate']}" . ($r['confidence'] !== null ? ' (confidence ' . round($r['confidence'] * 100) . '%)' : '') : 'Service answered but found no plate.');
 
+        case 'odoo':
+            out(true, (new OdooSync($c))->test());
+        case 'odoo_sync':
+            $r = OdooSync::syncPending(500);
+            out(!$r['error'], "Sent {$r['ok']}, failed {$r['failed']}" . ($r['error'] ? ': ' . $r['error'] : ''));
+        case 'odoo_pull':
+            $o = new OdooSync(Settings::all()); $a = $o->pullPurchaseOrders(); $b = $o->pullMasters();
+            out(true, "Purchase orders: {$a['pos']} ({$a['lines']} lines). New parties: {$b['parties']}, new materials: {$b['materials']}.");
         case 'oracle':
             out(true, (new OracleSync($c))->test());
         case 'sync':

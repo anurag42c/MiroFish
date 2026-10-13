@@ -135,9 +135,11 @@ SQL);
         }
         $cols = array_column(self::all('PRAGMA table_info(weighments)'), 'name');
         foreach (['gate_entry_id' => 'INTEGER', 'first_img' => 'TEXT', 'second_img' => 'TEXT', 'scale_id' => 'INTEGER', 'second_scale_id' => 'INTEGER',
-                  'plate_in' => 'TEXT', 'plate_in_conf' => 'REAL', 'plate_out' => 'TEXT', 'plate_out_conf' => 'REAL', 'plate_flag' => 'TEXT'] as $c => $t) {
+                  'plate_in' => 'TEXT', 'plate_in_conf' => 'REAL', 'plate_out' => 'TEXT', 'plate_out_conf' => 'REAL', 'plate_flag' => 'TEXT',
+                  'odoo_status' => "TEXT NOT NULL DEFAULT 'NA'", 'odoo_id' => 'INTEGER', 'odoo_at' => 'TEXT', 'odoo_error' => 'TEXT', 'odoo_tries' => 'INTEGER NOT NULL DEFAULT 0'] as $c => $t) {
             if (!in_array($c, $cols, true)) { self::pdo()->exec("ALTER TABLE weighments ADD COLUMN $c $t"); }
         }
+        self::pdo()->exec('CREATE INDEX IF NOT EXISTS ix_w_odoo ON weighments(odoo_status)');
         Scales::ensureDefault();   // v1 -> v3: the single scale becomes "Scale 1" keeping its settings
     }
 

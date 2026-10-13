@@ -4,7 +4,7 @@ Auth::require(true);
 
 $tab = $_GET['tab'] ?? 'scales';
 $sid = (int)($_GET['id'] ?? 0);
-$tabs = ['scales' => 'Scales', 'gates' => 'Gates', 'anpr' => 'Plate recognition', 'docs' => 'Documents & OCR', 'oracle' => 'Oracle transfer', 'general' => 'General', 'users' => 'Users', 'diag' => 'Diagnostics'];
+$tabs = ['scales' => 'Scales', 'gates' => 'Gates', 'anpr' => 'Plate recognition', 'docs' => 'Documents & OCR', 'oracle' => 'Oracle transfer', 'odoo' => 'Odoo & API', 'general' => 'General', 'users' => 'Users', 'diag' => 'Diagnostics'];
 if ($tab === 'scale') { if (!Scales::find($sid)) { $tab = 'scales'; } }
 elseif ($tab === 'gate') { if (!Gates::find($sid)) { $tab = 'gates'; } }
 elseif (!isset($tabs[$tab])) { $tab = 'scales'; }
@@ -16,9 +16,10 @@ $fields = [
     'gates' => ['gate_require_entry', 'gate_exit_policy'],
     'anpr' => ['anpr_provider', 'anpr_url', 'anpr_key', 'anpr_region', 'anpr_command', 'anpr_min_conf', 'anpr_policy'],
     'oracle' => ['ora_host', 'ora_port', 'ora_service', 'ora_user', 'ora_pass', 'ora_table', 'ora_batch'],
+    'odoo' => ['odoo_url', 'odoo_db', 'odoo_user', 'odoo_key', 'odoo_model', 'odoo_timeout', 'odoo_batch'],
     'general' => ['company_name', 'company_address', 'ticket_prefix'],
 ];
-$checks = ['docs' => ['sap_csrf'], 'anpr' => ['anpr_auto'], 'oracle' => ['ora_enabled'], 'general' => ['allow_manual']];
+$checks = ['docs' => ['sap_csrf'], 'anpr' => ['anpr_auto'], 'oracle' => ['ora_enabled'], 'odoo' => ['odoo_enabled', 'odoo_pull_po', 'odoo_pull_masters', 'api_write'], 'general' => ['allow_manual']];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Auth::checkCsrf();
@@ -335,9 +336,29 @@ if ($tab === 'scales'): ?>
   <label>Ticket prefix</label><?= $in('ticket_prefix') ?>
   <label style="text-transform:none;font-weight:400"><input type="checkbox" name="allow_manual" value="1" <?= $s['allow_manual'] === '1' ? 'checked' : '' ?>> Allow manual weight entry when scale is unavailable (flagged on the slip)</label>
   <p><button>Save</button></p></div>
-<div class="card" style="max-width:560px"><h2>ERP REST API</h2>
-  <p class="hint">Read-only endpoint <code>api/v1/tickets.php?since_id=N</code> with header <code>Authorization: Bearer &lt;token&gt;</code>. Status: <b><?= $s['api_token_hash'] !== '' ? 'token set' : 'disabled' ?></b></p>
-  <button name="do" value="apitoken">Generate new token</button> <button name="do" value="apioff" class="sec">Disable API</button></div>
+</form>
+
+<?php elseif ($tab === 'odoo'): ?>
+<form id="f" method="post"><?= csrf_field() ?>
+<div class="card" style="max-width:640px"><h2>Odoo connection (JSON-RPC)</h2>
+  <p class="hint">Works with Odoo 14-18 (Community, Enterprise, Odoo.sh, Odoo Online). Install the addon <code>odoo/wb_weighbridge</code> in Odoo first. Create an API key in Odoo under <i>Preferences &gt; Account Security &gt; New API Key</i>.</p>
+  <label style="text-transform:none;font-weight:400"><input type="checkbox" name="odoo_enabled" value="1" <?= $s['odoo_enabled'] === '1' ? 'checked' : '' ?>> Send completed tickets to Odoo automatically</label>
+  <label>Odoo URL</label><?= $in('odoo_url', 'text', 'placeholder="https://mycompany.odoo.com"') ?>
+  <div class="row"><div><label>Database</label><?= $in('odoo_db') ?></div><div><label>Login (user)</label><?= $in('odoo_user', 'text', 'autocomplete="off"') ?></div></div>
+  <label>API key <?= $s['odoo_key'] !== '' ? '(saved - leave blank to keep)' : '' ?></label><input name="odoo_key" type="password" autocomplete="new-password">
+  <div class="row"><div><label>Odoo model</label><?= $in('odoo_model') ?></div><div><label>Timeout (s)</label><?= $in('odoo_timeout', 'number') ?></div><div><label>Batch</label><?= $in('odoo_batch', 'number') ?></div></div>
+  <label style="text-transform:none;font-weight:400"><input type="checkbox" name="odoo_pull_po" value="1" <?= $s['odoo_pull_po'] === '1' ? 'checked' : '' ?>> Also fetch confirmed purchase orders from Odoo (used to check invoices)</label>
+  <label style="text-transform:none;font-weight:400"><input type="checkbox" name="odoo_pull_masters" value="1" <?= $s['odoo_pull_masters'] === '1' ? 'checked' : '' ?>> Also fetch vendors/customers and products (drop-down lists)</label>
+  <div class="hint">Tickets are created or updated by ticket number, so retries never duplicate. If Odoo is down they stay PENDING and are sent when it returns. Run <code>bin/sync_odoo.php --loop=30</code> (installed as a service in <code>deploy/</code>).</div>
+  <p><button>Save</button> <button type="button" class="sec" data-test="odoo">Test Odoo connection</button> <button type="button" class="ok" data-test="odoo_sync">Send pending now</button>
+     <button type="button" class="sec" data-test="odoo_pull">Fetch POs / masters now</button></p>
+  <pre class="log" id="out" style="display:none"></pre>
+</div>
+<div class="card" style="max-width:640px"><h2>REST API (for Odoo, ERP, any system)</h2>
+  <p class="hint">Base URL <code><?= e(((!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'host') . rtrim(dirname(dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/\\')) . '/api/v1/') ?></code> - header <code>Authorization: Bearer &lt;token&gt;</code>.
+  Endpoints: <code>ping</code>, <code>tickets</code>, <code>documents</code>, <code>purchase_orders</code>, <code>masters</code>; spec: <code>api/v1/openapi.php</code>. Status: <b><?= $s['api_token_hash'] !== '' ? 'token set' : 'disabled' ?></b></p>
+  <label style="text-transform:none;font-weight:400"><input type="checkbox" name="api_write" value="1" <?= $s['api_write'] === '1' ? 'checked' : '' ?>> Allow API writes (POST purchase orders and master data). Reading is always allowed with a valid token.</label>
+  <p><button>Save</button> <button name="do" value="apitoken" class="sec">Generate new token</button> <button name="do" value="apioff" class="sec">Disable API</button></p></div>
 </form>
 
 <?php elseif ($tab === 'users'): ?>
@@ -360,6 +381,7 @@ if ($tab === 'scales'): ?>
 <tr><td>Scale <?= (int)$sc['id'] ?>: <?= e($sc['name']) ?></td><td><span class="badge <?= !$sc['enabled'] ? '' : ($l['daemon_alive'] ? 'ok' : 'bad') ?>"><?= !$sc['enabled'] ? 'DISABLED' : ($l['daemon_alive'] ? 'READER RUNNING' : 'READER NOT RUNNING') ?></span> <?= e($l['status'] ?? '') ?> <?= e($l['message'] ?? '') ?></td></tr>
 <?php endforeach; ?>
 <tr><td>ANPR</td><td><?= Anpr::enabled() ? e(Settings::get('anpr_provider')) . ', policy ' . e(Settings::get('anpr_policy')) : 'off' ?></td></tr>
+<tr><td>Pending / failed Odoo</td><td><?= (int)Db::val("SELECT COUNT(*) FROM weighments WHERE status IN ('CLOSED','CANCELLED') AND odoo_status IN ('PENDING','FAILED')") ?></td></tr>
 <tr><td>Pending / failed Oracle</td><td><?= (int)Db::val("SELECT COUNT(*) FROM weighments WHERE status IN ('CLOSED','CANCELLED') AND sync_status IN ('PENDING','FAILED')") ?></td></tr>
 <tr><td>Last sync error</td><td><?= e((string)Db::val("SELECT sync_error FROM weighments WHERE sync_error IS NOT NULL ORDER BY id DESC LIMIT 1")) ?></td></tr>
 <tr><td>Database file</td><td><?= e(WB_DB) ?> (<?= number_format(filesize(WB_DB) / 1024) ?> KB)</td></tr></table></div>

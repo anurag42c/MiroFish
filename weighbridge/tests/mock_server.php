@@ -32,6 +32,38 @@ switch ($path) {
         file_put_contents(getenv('RELAY_LOG') ?: '/dev/null', sprintf("%.3f AUTHOK\n", microtime(true)), FILE_APPEND);
         echo 'ok'; break;
     case '/relay/fail': http_response_code(503); echo 'busy'; break;
+    case '/jsonrpc':                                // fake Odoo external API (JSON-RPC): wb.ticket model + purchase lines + masters
+        $req = json_decode((string)file_get_contents('php://input'), true) ?: [];
+        $a = $req['params']['args'] ?? []; $svc = $req['params']['service'] ?? ''; $meth = $req['params']['method'] ?? '';
+        $stf = getenv('ODOO_STATE') ?: '/tmp/odoo_state.json';
+        $st = is_file($stf) ? json_decode((string)file_get_contents($stf), true) : ['tickets' => [], 'next' => 1, 'calls' => 0];
+        $ok = fn($r) => print(json_encode(['jsonrpc' => '2.0', 'id' => $req['id'] ?? 1, 'result' => $r]));
+        $fail = fn($m) => print(json_encode(['jsonrpc' => '2.0', 'id' => $req['id'] ?? 1, 'error' => ['code' => 200, 'message' => 'Odoo Server Error', 'data' => ['message' => $m]]]));
+        if ($svc === 'common' && $meth === 'version') { $ok(['server_version' => '17.0', 'server_version_info' => [17, 0, 0, 'final', 0]]); break; }
+        if ($svc === 'common' && $meth === 'authenticate') { $ok(($a[0] ?? '') === 'testdb' && ($a[1] ?? '') === 'admin' && ($a[2] ?? '') === 'odookey' ? 2 : false); break; }
+        if ($svc === 'object' && $meth === 'execute_kw') {
+            [$db, $uid, $key, $model, $m, $args, $kw] = $a + [null, null, null, null, null, [], []];
+            if ($db !== 'testdb' || $uid !== 2 || $key !== 'odookey') { $fail('Access Denied'); break; }
+            if (getenv('ODOO_DOWN') || is_file($stf . '.down')) { http_response_code(503); echo 'down'; break; }
+            $st['calls']++;
+            if ($model === 'wb.ticket') {
+                if ($m === 'search_count') { $ok(count($st['tickets'])); }
+                elseif ($m === 'search') { $no = $args[0][0][2] ?? null; $ids = []; foreach ($st['tickets'] as $id => $t) { if (($t['ticket_no'] ?? null) === $no) { $ids[] = (int)$id; } } $ok($ids); }
+                elseif ($m === 'create') {
+                    if (($args[0]['ticket_no'] ?? '') === 'WBREJECT') { $fail('ValidationError: ticket rejected by rule'); break; }
+                    $id = $st['next']++; $st['tickets'][$id] = $args[0]; $ok($id);
+                } elseif ($m === 'write') { foreach ($args[0] as $id) { $st['tickets'][$id] = $args[1] + $st['tickets'][$id]; } $ok(true); }
+                else { $fail("bad method $m"); }
+            } elseif ($model === 'purchase.order.line' && $m === 'search_read') {
+                $ok([['id' => 1, 'order_id' => [7, 'P00007'], 'sequence' => 10, 'partner_id' => [5, 'Shree Balaji Minerals Pvt Ltd'], 'product_id' => [9, '[IRON01] Iron Ore Lumps'], 'name' => 'Iron Ore Lumps', 'product_qty' => 40.0, 'product_uom' => [3, 'MT'], 'price_unit' => 3500.0, 'date_order' => '2026-09-10 05:00:00'],
+                     ['id' => 2, 'order_id' => [7, 'P00007'], 'sequence' => 20, 'partner_id' => [5, 'Shree Balaji Minerals Pvt Ltd'], 'product_id' => [10, 'Coal'], 'name' => 'Coal', 'product_qty' => 15.0, 'product_uom' => [3, 'MT'], 'price_unit' => 900.0, 'date_order' => '2026-09-10 05:00:00'],
+                     ['id' => 3, 'order_id' => [8, 'P00008'], 'sequence' => 10, 'partner_id' => [6, 'Other Ltd'], 'product_id' => [10, 'Coal'], 'name' => 'Coal', 'product_qty' => 0.0, 'product_uom' => [3, 'MT'], 'price_unit' => 1.0, 'date_order' => false]]);
+            } elseif ($model === 'res.partner' && $m === 'search_read') { $ok([['id' => 5, 'name' => 'Shree Balaji Minerals Pvt Ltd'], ['id' => 11, 'name' => 'Odoo Customer Co']]);
+            } elseif ($model === 'product.product' && $m === 'search_read') { $ok([['id' => 9, 'name' => 'Iron Ore Lumps'], ['id' => 12, 'name' => 'Limestone']]);
+            } else { $fail("Object $model doesn't exist"); }
+            file_put_contents($stf, json_encode($st)); break;
+        }
+        $fail('unknown service'); break;
     case '/v1/messages':                            // fake Anthropic Messages API: logs the request shape, answers by API key
         $key = $_SERVER['HTTP_X_API_KEY'] ?? '';
         $raw = file_get_contents('php://input'); $req = json_decode($raw, true) ?: [];
